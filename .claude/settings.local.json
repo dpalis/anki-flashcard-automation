@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source venv/bin/activate)",
+      "Bash(python3:*)",
+      "Bash(chmod:*)",
+      "Bash(./run.sh:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
