@@ -1,6 +1,8 @@
 ## Objetivo
 Gerar flashcards com **todos os significados frequentes e comuns** de uma palavra/expressão em inglês, **ordenados do mais comum para o menos comum**, com exemplos claros. Em seguida, **automaticamente** (sem pedir confirmação), gerar **uma única imagem conceitual por palavra**, **sem letras, palavras, números ou símbolos que pareçam texto**, para facilitar a memorização.
 
+**IMPORTANTE**: As definições e exemplos devem ser escritos em INGLÊS. Apenas a tradução final deve estar em português.
+
 ---
 
 ## Regra crucial: ordem dos significados
@@ -8,7 +10,7 @@ Gerar flashcards com **todos os significados frequentes e comuns** de uma palavr
 - Priorize dados de frequência/saliência de dicionários de uso (Oxford, Longman, Macmillan) e corpora modernos.
 - Em caso de empate, escolha o sentido **mais amplo e cotidiano** antes do técnico/setorial.
 - Sentidos arcaicos, regionais ou de jargão ficam **por último** e só entram se forem realmente comuns.
-- Se houver mais de três sentidos frequentes, **continue listando** com "**It also means …**" em **novas linhas**, preservando a ordem de frequência.
+- Se houver mais de três sentidos frequentes, **continue listando** em **novas linhas**, preservando a ordem de frequência.
 
 ---
 
@@ -22,15 +24,15 @@ Gerar flashcards com **todos os significados frequentes e comuns** de uma palavr
 ### ESTRUTURA OBRIGATÓRIA (copie sem os ``` do markdown):
 
 Flashcard: [palavra ou expressão]
-It means [definição mais comum, clara e concisa],
+[Definição mais comum, clara e concisa - INICIE COM LETRA MAIÚSCULA],
 [Frase complementar opcional detalhando este significado].
 [LINHA EM BRANCO]
-It also means [2º significado mais comum],
+[2º significado mais comum - INICIE COM LETRA MAIÚSCULA],
 [Frase complementar opcional].
 [LINHA EM BRANCO]
-It also means [3º significado mais comum],
+[3º significado mais comum - INICIE COM LETRA MAIÚSCULA],
 [Frase complementar opcional].
-[LINHA EM BRANCO - se houver mais significados, continue com "It also means..."]
+[LINHA EM BRANCO - se houver mais significados, continue na mesma estrutura]
 Ex.: [Exemplo prático do 1º significado]
 Ex.: [Exemplo prático do 2º significado]
 Ex.: [Exemplo adicional, se aplicável]
@@ -42,8 +44,8 @@ Ex.: [Exemplo adicional, se aplicável]
 ### REGRAS OBRIGATÓRIAS:
 
 1. **Linha "Flashcard:"** - Sempre inclua (será processada pelo sistema)
-2. **Primeira definição** - SEMPRE começa com "It means"
-3. **Demais definições** - SEMPRE usam "It also means"
+2. **Todas as definições** - SEMPRE começam com letra MAIÚSCULA (A, T, B, etc.)
+3. **NÃO use** "It means" ou "It also means" - comece diretamente com a definição
 4. **Pontuação das definições**:
    - Se houver frase complementar: definição termina com vírgula
    - Frase complementar termina com ponto final
@@ -76,10 +78,10 @@ Ex.: [Exemplo adicional, se aplicável]
 ### Exemplo 1 (verbo simples):
 
 Flashcard: to deem
-It means to consider or judge something in a particular way,
+To consider or judge something in a particular way,
 Especially in formal or official contexts.
 
-It also means to regard something as having a specified quality,
+To regard something as having a specified quality,
 Usually in legal or formal situations.
 
 Ex.: The court deemed the evidence insufficient for conviction.
@@ -92,13 +94,13 @@ Verb
 ### Exemplo 2 (verbo com múltiplos sentidos):
 
 Flashcard: to grind
-It means to crush or reduce something into small pieces or powder,
+To crush or reduce something into small pieces or powder,
 Usually by rubbing, pressing, or mechanical action.
 
-It also means to make a harsh, grating noise by rubbing surfaces together,
+To make a harsh, grating noise by rubbing surfaces together,
 Often describing mechanical or friction sounds.
 
-It also means to work or study very hard continuously,
+To work or study very hard continuously,
 Especially in repetitive or difficult tasks.
 
 Ex.: She grinds coffee beans every morning for a fresh brew.
@@ -112,10 +114,10 @@ Verb
 ### Exemplo 3 (adjetivo):
 
 Flashcard: nimble
-It means quick and light in movement or action,
+Quick and light in movement or action,
 Showing agility and dexterity in physical movements.
 
-It also means quick to understand or respond mentally,
+Quick to understand or respond mentally,
 Demonstrating mental agility and sharp thinking.
 
 Ex.: The nimble dancer moved gracefully across the stage.
@@ -151,3 +153,11 @@ Adjective
 ---
 
 ## Ao final do flashcard, inclua uma seção chamada "CONCEITO VISUAL" com a descrição detalhada para gerar a imagem, seguindo todas as regras acima.
+
+**IMPORTANTE**: Na seção "CONCEITO VISUAL", escreva APENAS a descrição textual do conceito. NÃO inclua:
+- Links de imagem markdown (![](url))
+- Separadores markdown (---)
+- Títulos markdown (##)
+- Qualquer outra formatação markdown
+
+Apenas o texto descritivo puro do conceito visual.

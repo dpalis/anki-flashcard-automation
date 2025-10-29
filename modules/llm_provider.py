@@ -62,7 +62,7 @@ class ClaudeProvider:
         try:
             # Chama a API da Anthropic
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-5-20250929",
                 max_tokens=2000,
                 messages=[
                     {"role": "user", "content": full_prompt}
@@ -129,9 +129,18 @@ class ClaudeProvider:
 
         content = '\n'.join(lines).strip()
 
+        # Remove "It means" e "It also means" e capitaliza a primeira letra
+        content = self._clean_it_means_phrases(content)
+
+        # Remove linhas com apenas "---" ao final
+        content = re.sub(r'\n+---+\s*$', '', content)
+
+        # Remove múltiplas linhas em branco ao final
+        content = content.rstrip() + '\n' if content else ''
+
         return {
             'word': word,
-            'content': content,
+            'content': content.rstrip(),
             'visual_concept': visual_concept
         }
 
@@ -154,9 +163,49 @@ class ClaudeProvider:
 
         if match:
             concept = match.group(1).strip()
-            return concept
+
+            # Remove markdown de imagens (![alt](url))
+            concept = re.sub(r'!\[.*?\]\(.*?\)', '', concept)
+
+            # Remove linhas com apenas "---" (separadores markdown)
+            concept = re.sub(r'^---+\s*$', '', concept, flags=re.MULTILINE)
+
+            # Remove linhas que começam com "##" (títulos markdown)
+            concept = re.sub(r'^##.*$', '', concept, flags=re.MULTILINE)
+
+            # Remove múltiplas quebras de linha
+            concept = re.sub(r'\n\s*\n+', '\n', concept)
+
+            # Remove espaços extras
+            concept = ' '.join(concept.split())
+
+            return concept.strip()
 
         return ""
+
+    def _clean_it_means_phrases(self, text: str) -> str:
+        """
+        Remove "It means" e "It also means" do início das definições,
+        capitalizando a primeira letra da palavra seguinte.
+
+        Args:
+            text: Texto do conteúdo do flashcard
+
+        Returns:
+            Texto limpo sem "It means" ou "It also means"
+        """
+        # Padrão para capturar "It means " ou "It also means " seguido de uma letra minúscula
+        # Captura após início de linha ou newline
+        pattern = r'(^|\n)(It also means |It means )([a-z])'
+
+        def replace_func(match):
+            prefix = match.group(1)  # Início da linha ou newline
+            first_letter = match.group(3).upper()  # Primeira letra capitalizada
+            return f"{prefix}{first_letter}"
+
+        cleaned_text = re.sub(pattern, replace_func, text, flags=re.MULTILINE)
+
+        return cleaned_text
 
     def validate_response(self, response: Dict[str, str]) -> bool:
         """

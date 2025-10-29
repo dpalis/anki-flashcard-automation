@@ -4,7 +4,8 @@
       "Bash(source venv/bin/activate)",
       "Bash(python3:*)",
       "Bash(chmod:*)",
-      "Bash(./run.sh:*)"
+      "Bash(./run.sh:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []
