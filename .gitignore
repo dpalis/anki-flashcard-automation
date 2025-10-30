@@ -1,9 +1,16 @@
 # API Keys e configurações sensíveis
 config/settings.json
+*.key
+*.secret
+.env
+.env.local
+.env.*.local
 
 # Cache e dados processados
 data/processadas.json
 data/images/
+*.log
+logs/
 
 # Python
 venv/
@@ -38,3 +45,6 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code (pode conter sessões e contexto sensível)
+.claude/
