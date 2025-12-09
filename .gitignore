@@ -8,6 +8,7 @@ config/settings.json
 
 # Cache e dados processados
 data/processadas.json
+data/palavras.txt
 data/images/
 *.log
 logs/

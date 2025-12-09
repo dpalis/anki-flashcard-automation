@@ -52,10 +52,10 @@ if grep -q '"anthropic_api_key": ""' config/settings.json 2>/dev/null; then
     exit 1
 fi
 
-# 6. Executa o main.py com todos os argumentos passados
-echo -e "${GREEN}✓${NC} Executando Anki Automation..."
+# 6. Executa o main.py com todos os argumentos passados, prevenindo modo de repouso
+echo -e "${GREEN}✓${NC} Executando Anki Automation (prevenindo modo de repouso)..."
 echo ""
-python main.py "$@"
+caffeinate -i python main.py "$@"
 
 # 7. Captura o código de saída
 EXIT_CODE=$?
