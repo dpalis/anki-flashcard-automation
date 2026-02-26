@@ -10,12 +10,12 @@ from pathlib import Path
 import requests
 
 
-class PollutionsImageProvider:
+class PollinationsImageProvider:
     """
     Provider para geração de imagens usando a API do Pollinations.ai.
     """
 
-    def __init__(self, output_dir: str, max_retries: int = 3, quality: str = "high"):
+    def __init__(self, output_dir: str, max_retries: int = 3, quality: str = "high", api_key: str = ""):
         """
         Inicializa o provider de imagens.
 
@@ -23,11 +23,13 @@ class PollutionsImageProvider:
             output_dir: Diretório onde as imagens serão salvas
             max_retries: Número máximo de tentativas para gerar imagem
             quality: Qualidade da imagem (high, medium, low)
+            api_key: Chave de API do Pollinations.ai
         """
         self.output_dir = Path(output_dir)
         self.max_retries = max_retries
         self.quality = quality
-        self.base_url = "https://image.pollinations.ai/prompt"
+        self.api_key = api_key
+        self.base_url = "https://gen.pollinations.ai/image"
 
         # Cria o diretório se não existir
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -98,21 +100,22 @@ class PollutionsImageProvider:
         Returns:
             URL completa para requisição
         """
-        # Faz URL encoding do conceito
         encoded_concept = urllib.parse.quote(concept)
 
-        # Constrói a URL com parâmetros de qualidade
-        url = f"{self.base_url}/{encoded_concept}"
-
-        # Adiciona parâmetros adicionais se necessário
+        params = {
+            "model": "flux",
+            "nologo": "true",
+            "key": self.api_key,
+        }
         if self.quality == "high":
-            url += "?width=1024&height=1024&nologo=true"
+            params.update({"width": "1024", "height": "1024"})
         elif self.quality == "medium":
-            url += "?width=768&height=768&nologo=true"
+            params.update({"width": "768", "height": "768"})
         else:
-            url += "?width=512&height=512&nologo=true"
+            params.update({"width": "512", "height": "512"})
 
-        return url
+        query_string = urllib.parse.urlencode(params)
+        return f"{self.base_url}/{encoded_concept}?{query_string}"
 
     def _enhance_concept_for_no_text(self, concept: str) -> str:
         """

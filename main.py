@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from modules.llm_provider import ClaudeProvider
-from modules.image_provider import PollutionsImageProvider
+from modules.image_provider import PollinationsImageProvider
 from modules.anki_connector import AnkiConnector
 from modules.card_formatter import CardFormatter
 
@@ -107,7 +107,7 @@ def is_processed(word: str, cache: Dict) -> bool:
 def process_word(
     word: str,
     llm_provider: ClaudeProvider,
-    image_provider: PollutionsImageProvider,
+    image_provider: PollinationsImageProvider,
     anki_connector: AnkiConnector,
     deck_name: str,
     tags: List[str],
@@ -299,10 +299,11 @@ def main():
             str(PROMPT_TEMPLATE_FILE)
         )
 
-        image_provider = PollutionsImageProvider(
+        image_provider = PollinationsImageProvider(
             str(IMAGES_DIR),
             settings['max_retries_image'],
-            settings['image_quality']
+            settings['image_quality'],
+            settings.get('pollinations_api_key', '')
         )
 
         print("  ✓ Providers inicializados")

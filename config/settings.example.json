@@ -6,5 +6,6 @@
   "image_provider": "pollinations",
   "anki_url": "http://localhost:8765",
   "max_retries_image": 3,
-  "image_quality": "high"
+  "image_quality": "high",
+  "pollinations_api_key": "YOUR_POLLINATIONS_API_KEY_HERE"
 }
