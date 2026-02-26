@@ -3,7 +3,7 @@ Módulo para integração com Claude API (Anthropic) para geração de conteúdo
 """
 
 import re
-from typing import Dict, Optional
+from typing import Dict
 from pathlib import Path
 import anthropic
 
@@ -13,15 +13,17 @@ class ClaudeProvider:
     Provider para comunicação com Claude API e geração de conteúdo dos flashcards.
     """
 
-    def __init__(self, api_key: str, prompt_template_path: str):
+    def __init__(self, api_key: str, prompt_template_path: str, model: str = "claude-sonnet-4-6"):
         """
         Inicializa o provider da Claude API.
 
         Args:
             api_key: Chave de API da Anthropic
             prompt_template_path: Caminho para o arquivo de template do prompt
+            model: ID do modelo Claude a usar
         """
         self.client = anthropic.Anthropic(api_key=api_key)
+        self.model = model
         self.prompt_template = self._load_prompt_template(prompt_template_path)
 
     def _load_prompt_template(self, template_path: str) -> str:
@@ -62,7 +64,7 @@ class ClaudeProvider:
         try:
             # Chama a API da Anthropic
             message = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model=self.model,
                 max_tokens=2000,
                 messages=[
                     {"role": "user", "content": full_prompt}

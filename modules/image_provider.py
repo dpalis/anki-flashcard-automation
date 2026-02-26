@@ -2,7 +2,6 @@
 Módulo para geração de imagens conceituais usando Pollinations.ai.
 """
 
-import os
 import time
 import urllib.parse
 from typing import Optional
@@ -10,12 +9,12 @@ from pathlib import Path
 import requests
 
 
-class PollutionsImageProvider:
+class PollinationsImageProvider:
     """
     Provider para geração de imagens usando a API do Pollinations.ai.
     """
 
-    def __init__(self, output_dir: str, max_retries: int = 3, quality: str = "high"):
+    def __init__(self, output_dir: str, max_retries: int = 3, quality: str = "high", api_key: str = ""):
         """
         Inicializa o provider de imagens.
 
@@ -23,11 +22,14 @@ class PollutionsImageProvider:
             output_dir: Diretório onde as imagens serão salvas
             max_retries: Número máximo de tentativas para gerar imagem
             quality: Qualidade da imagem (high, medium, low)
+            api_key: Chave de API do Pollinations.ai
         """
         self.output_dir = Path(output_dir)
         self.max_retries = max_retries
         self.quality = quality
-        self.base_url = "https://image.pollinations.ai/prompt"
+        self.api_key = api_key
+        self.base_url = "https://gen.pollinations.ai/image"
+        self.session = requests.Session()
 
         # Cria o diretório se não existir
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -67,7 +69,7 @@ class PollutionsImageProvider:
                 image_url = self._build_image_url(enhanced_concept)
 
                 # Faz o download da imagem
-                response = requests.get(image_url, timeout=30)
+                response = self.session.get(image_url, timeout=30)
                 response.raise_for_status()
 
                 # Salva a imagem
@@ -78,7 +80,8 @@ class PollutionsImageProvider:
                 return str(output_path)
 
             except requests.exceptions.RequestException as e:
-                print(f"  ✗ Erro ao baixar imagem (tentativa {attempt}): {str(e)}")
+                error_msg = str(e).replace(self.api_key, '***') if self.api_key else str(e)
+                print(f"  ✗ Erro ao baixar imagem (tentativa {attempt}): {error_msg}")
 
                 if attempt < self.max_retries:
                     # Aguarda antes de tentar novamente
@@ -98,21 +101,20 @@ class PollutionsImageProvider:
         Returns:
             URL completa para requisição
         """
-        # Faz URL encoding do conceito
         encoded_concept = urllib.parse.quote(concept)
 
-        # Constrói a URL com parâmetros de qualidade
-        url = f"{self.base_url}/{encoded_concept}"
+        params = {
+            "model": "flux",
+            "nologo": "true",
+        }
+        if self.api_key:
+            params["key"] = self.api_key
+        sizes = {"high": "1024", "medium": "768"}
+        size = sizes.get(self.quality, "512")
+        params.update({"width": size, "height": size})
 
-        # Adiciona parâmetros adicionais se necessário
-        if self.quality == "high":
-            url += "?width=1024&height=1024&nologo=true"
-        elif self.quality == "medium":
-            url += "?width=768&height=768&nologo=true"
-        else:
-            url += "?width=512&height=512&nologo=true"
-
-        return url
+        query_string = urllib.parse.urlencode(params)
+        return f"{self.base_url}/{encoded_concept}?{query_string}"
 
     def _enhance_concept_for_no_text(self, concept: str) -> str:
         """
@@ -148,30 +150,3 @@ class PollutionsImageProvider:
 
         return safe
 
-    def image_exists(self, word: str) -> bool:
-        """
-        Verifica se a imagem para uma palavra já existe.
-
-        Args:
-            word: Palavra a verificar
-
-        Returns:
-            True se a imagem existe, False caso contrário
-        """
-        safe_word = self._sanitize_filename(word)
-        image_path = self.output_dir / f"{safe_word}.jpg"
-
-        return image_path.exists()
-
-    def get_image_path(self, word: str) -> str:
-        """
-        Retorna o caminho completo da imagem para uma palavra.
-
-        Args:
-            word: Palavra
-
-        Returns:
-            Caminho completo da imagem
-        """
-        safe_word = self._sanitize_filename(word)
-        return str(self.output_dir / f"{safe_word}.jpg")

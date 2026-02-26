@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from modules.llm_provider import ClaudeProvider
-from modules.image_provider import PollutionsImageProvider
+from modules.image_provider import PollinationsImageProvider
 from modules.anki_connector import AnkiConnector
 from modules.card_formatter import CardFormatter
 
@@ -107,7 +107,7 @@ def is_processed(word: str, cache: Dict) -> bool:
 def process_word(
     word: str,
     llm_provider: ClaudeProvider,
-    image_provider: PollutionsImageProvider,
+    image_provider: PollinationsImageProvider,
     anki_connector: AnkiConnector,
     deck_name: str,
     tags: List[str],
@@ -270,6 +270,8 @@ def main():
         # 1. Carrega configurações
         print("\n📋 Carregando configurações...")
         settings = load_settings()
+        if not settings.get('pollinations_api_key'):
+            print("  ⚠ pollinations_api_key não configurada — imagens podem falhar")
         print("  ✓ Configurações carregadas")
 
         # 2. Verifica conexão com Anki
@@ -296,13 +298,15 @@ def main():
         print("\n⚙️  Inicializando providers...")
         llm_provider = ClaudeProvider(
             settings['anthropic_api_key'],
-            str(PROMPT_TEMPLATE_FILE)
+            str(PROMPT_TEMPLATE_FILE),
+            settings.get('llm_model', 'claude-sonnet-4-6')
         )
 
-        image_provider = PollutionsImageProvider(
+        image_provider = PollinationsImageProvider(
             str(IMAGES_DIR),
             settings['max_retries_image'],
-            settings['image_quality']
+            settings['image_quality'],
+            settings.get('pollinations_api_key', '')
         )
 
         print("  ✓ Providers inicializados")

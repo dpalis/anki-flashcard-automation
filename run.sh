@@ -45,11 +45,19 @@ if ! python -c "import anthropic" 2>/dev/null; then
     pip install -r requirements.txt
 fi
 
-# 5. Verifica se a API key está configurada
+# 5. Verifica se a API key da Anthropic está configurada
 if grep -q '"anthropic_api_key": ""' config/settings.json 2>/dev/null; then
     echo -e "${RED}❌ Erro: API key da Anthropic não configurada!${NC}"
     echo "   Edite config/settings.json e adicione sua chave"
     exit 1
+fi
+
+# 5b. Verifica se a API key do Pollinations está configurada
+if grep -q '"pollinations_api_key": ""' config/settings.json 2>/dev/null || \
+   grep -q '"pollinations_api_key": "YOUR_POLLINATIONS_API_KEY_HERE"' config/settings.json 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  Aviso: API key do Pollinations não configurada${NC}"
+    echo "   Imagens podem falhar sem a chave configurada"
+    echo ""
 fi
 
 # 6. Executa o main.py com todos os argumentos passados, prevenindo modo de repouso
