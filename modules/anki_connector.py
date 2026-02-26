@@ -22,6 +22,7 @@ class AnkiConnector:
         """
         self.anki_url = anki_url
         self.card_model = card_model
+        self.session = requests.Session()
         self._field_names = None  # Cache dos nomes dos campos
 
     def check_connection(self) -> bool:
@@ -215,7 +216,7 @@ class AnkiConnector:
         }
 
         try:
-            response = requests.post(self.anki_url, json=payload, timeout=10)
+            response = self.session.post(self.anki_url, json=payload, timeout=10)
             response.raise_for_status()
 
             result = response.json()

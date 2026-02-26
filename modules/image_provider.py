@@ -2,7 +2,6 @@
 Módulo para geração de imagens conceituais usando Pollinations.ai.
 """
 
-import os
 import time
 import urllib.parse
 from typing import Optional
@@ -30,6 +29,7 @@ class PollinationsImageProvider:
         self.quality = quality
         self.api_key = api_key
         self.base_url = "https://gen.pollinations.ai/image"
+        self.session = requests.Session()
 
         # Cria o diretório se não existir
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -69,7 +69,7 @@ class PollinationsImageProvider:
                 image_url = self._build_image_url(enhanced_concept)
 
                 # Faz o download da imagem
-                response = requests.get(image_url, timeout=30)
+                response = self.session.get(image_url, timeout=30)
                 response.raise_for_status()
 
                 # Salva a imagem
@@ -80,7 +80,8 @@ class PollinationsImageProvider:
                 return str(output_path)
 
             except requests.exceptions.RequestException as e:
-                print(f"  ✗ Erro ao baixar imagem (tentativa {attempt}): {str(e)}")
+                error_msg = str(e).replace(self.api_key, '***') if self.api_key else str(e)
+                print(f"  ✗ Erro ao baixar imagem (tentativa {attempt}): {error_msg}")
 
                 if attempt < self.max_retries:
                     # Aguarda antes de tentar novamente
@@ -105,14 +106,12 @@ class PollinationsImageProvider:
         params = {
             "model": "flux",
             "nologo": "true",
-            "key": self.api_key,
         }
-        if self.quality == "high":
-            params.update({"width": "1024", "height": "1024"})
-        elif self.quality == "medium":
-            params.update({"width": "768", "height": "768"})
-        else:
-            params.update({"width": "512", "height": "512"})
+        if self.api_key:
+            params["key"] = self.api_key
+        sizes = {"high": "1024", "medium": "768"}
+        size = sizes.get(self.quality, "512")
+        params.update({"width": size, "height": size})
 
         query_string = urllib.parse.urlencode(params)
         return f"{self.base_url}/{encoded_concept}?{query_string}"

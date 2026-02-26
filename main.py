@@ -270,6 +270,8 @@ def main():
         # 1. Carrega configurações
         print("\n📋 Carregando configurações...")
         settings = load_settings()
+        if not settings.get('pollinations_api_key'):
+            print("  ⚠ pollinations_api_key não configurada — imagens podem falhar")
         print("  ✓ Configurações carregadas")
 
         # 2. Verifica conexão com Anki
@@ -296,7 +298,8 @@ def main():
         print("\n⚙️  Inicializando providers...")
         llm_provider = ClaudeProvider(
             settings['anthropic_api_key'],
-            str(PROMPT_TEMPLATE_FILE)
+            str(PROMPT_TEMPLATE_FILE),
+            settings.get('llm_model', 'claude-sonnet-4-6')
         )
 
         image_provider = PollinationsImageProvider(
