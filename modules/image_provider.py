@@ -150,30 +150,3 @@ class PollinationsImageProvider:
 
         return safe
 
-    def image_exists(self, word: str) -> bool:
-        """
-        Verifica se a imagem para uma palavra já existe.
-
-        Args:
-            word: Palavra a verificar
-
-        Returns:
-            True se a imagem existe, False caso contrário
-        """
-        safe_word = self._sanitize_filename(word)
-        image_path = self.output_dir / f"{safe_word}.jpg"
-
-        return image_path.exists()
-
-    def get_image_path(self, word: str) -> str:
-        """
-        Retorna o caminho completo da imagem para uma palavra.
-
-        Args:
-            word: Palavra
-
-        Returns:
-            Caminho completo da imagem
-        """
-        safe_word = self._sanitize_filename(word)
-        return str(self.output_dir / f"{safe_word}.jpg")

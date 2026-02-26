@@ -132,33 +132,3 @@ class CardFormatter:
         text = text.replace('>', '&gt;')
 
         return text
-
-    def format_complete_card(
-        self,
-        word: str,
-        content: str,
-        image_filename: str,
-        card_type: str = "image_to_word"
-    ) -> tuple[str, str]:
-        """
-        Formata um card completo (frente e verso).
-
-        Args:
-            word: Palavra em inglês
-            content: Conteúdo do flashcard
-            image_filename: Nome do arquivo de imagem
-            card_type: Tipo do card ("image_to_word" ou "word_to_image")
-
-        Returns:
-            Tupla (front_html, back_html)
-        """
-        if card_type == "image_to_word":
-            # Card 1: Imagem → Palavra + Conteúdo
-            front = self.format_front_image(image_filename)
-            back = self.format_back(word, content, image_filename, include_image=False)
-        else:
-            # Card 2: Palavra → Imagem + Conteúdo
-            front = self.format_front_word(word)
-            back = self.format_back(word, content, image_filename, include_image=True)
-
-        return front, back
