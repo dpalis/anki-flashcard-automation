@@ -49,3 +49,6 @@ Thumbs.db
 
 # Claude Code (pode conter sessões e contexto sensível)
 .claude/
+
+# Git worktrees locais
+.worktrees/
