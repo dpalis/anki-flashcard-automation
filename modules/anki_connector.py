@@ -1,240 +1,252 @@
-"""
-Módulo para comunicação com AnkiConnect e criação de cards no Anki.
-"""
+"""Minimal AnkiConnect client for new V2 notes only."""
 
-import json
-from typing import List, Dict, Optional
+from __future__ import annotations
+
+import base64
+import re
+from pathlib import Path
+from typing import Any
+
 import requests
+
+from .profiles import ENGLISH_VOCABULARY, SPANISH_TRAVEL, Profile
+
+
+ITEM_ID_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+V2_PROFILES = (ENGLISH_VOCABULARY, SPANISH_TRAVEL)
+MUTATING_ACTIONS = frozenset({"createModel", "storeMediaFile", "addNote"})
+
+
+class AnkiConnectError(Exception):
+    def __init__(self, action: str, message: str, outcome_uncertain: bool = False) -> None:
+        super().__init__(message)
+        self.action = action
+        self.outcome_uncertain = outcome_uncertain
 
 
 class AnkiConnector:
-    """
-    Conector para comunicação com AnkiConnect e gerenciamento de cards.
-    """
-
-    def __init__(self, anki_url: str = "http://localhost:8765", card_model: str = "Básico"):
-        """
-        Inicializa o conector do Anki.
-
-        Args:
-            anki_url: URL do AnkiConnect (padrão: http://localhost:8765)
-            card_model: Nome do modelo de card (padrão: "Básico")
-        """
+    def __init__(
+        self,
+        anki_url: str = "http://localhost:8765",
+        *,
+        session: Any | None = None,
+        timeout: float = 10,
+    ) -> None:
         self.anki_url = anki_url
-        self.card_model = card_model
-        self.session = requests.Session()
-        self._field_names = None  # Cache dos nomes dos campos
+        self.session = session or requests.Session()
+        self.timeout = timeout
 
-    def check_connection(self) -> bool:
-        """
-        Verifica se o AnkiConnect está disponível.
-
-        Returns:
-            True se conectado, False caso contrário
-        """
+    def _invoke(self, action: str, **params: Any) -> Any:
+        uncertain = action in MUTATING_ACTIONS
+        payload = {"action": action, "version": 6, "params": params}
         try:
-            response = self._invoke("version")
-            return response is not None
-        except Exception:
-            return False
+            response = self.session.post(self.anki_url, json=payload, timeout=self.timeout)
+            response.raise_for_status()
+            envelope = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise AnkiConnectError(
+                action,
+                f"Falha de transporte ou resposta inv\u00e1lida em {action}: {exc}",
+                outcome_uncertain=uncertain,
+            ) from exc
 
-    def get_model_field_names(self) -> List[str]:
-        """
-        Obtém os nomes dos campos do modelo de card.
+        if not isinstance(envelope, dict) or set(envelope) != {"result", "error"}:
+            raise AnkiConnectError(
+                action,
+                f"Envelope inv\u00e1lido do AnkiConnect em {action}",
+                outcome_uncertain=uncertain,
+            )
+        if envelope["error"] is not None:
+            raise AnkiConnectError(action, str(envelope["error"]), outcome_uncertain=False)
+        return envelope["result"]
 
-        Returns:
-            Lista com os nomes dos campos (geralmente [campo_frente, campo_verso])
-        """
-        if self._field_names is None:
-            try:
-                self._field_names = self._invoke("modelFieldNames", modelName=self.card_model)
-            except Exception:
-                # Fallback para nomes padrão em português
-                self._field_names = ["Frente", "Verso"]
-
-        return self._field_names
-
-    def create_deck_if_needed(self, deck_name: str) -> bool:
-        """
-        Cria um deck no Anki se ele não existir.
+    def find_exact_items(self, item_id: str) -> list[str]:
+        """Return notes whose stored ItemId exactly matches the requested ID.
 
         Args:
-            deck_name: Nome do deck
+            item_id: Deterministic hexadecimal V2 item identifier.
 
         Returns:
-            True se o deck existe ou foi criado com sucesso
-        """
-        try:
-            # Verifica se o deck existe
-            decks = self._invoke("deckNames")
-            if deck_name in decks:
-                return True
-
-            # Cria o deck
-            self._invoke("createDeck", deck=deck_name)
-            print(f"  ✓ Deck '{deck_name}' criado")
-            return True
-
-        except Exception as e:
-            print(f"  ✗ Erro ao criar deck: {str(e)}")
-            return False
-
-    def add_media_file(self, file_path: str, filename: str) -> bool:
-        """
-        Adiciona um arquivo de mídia (imagem) ao Anki.
-
-        Args:
-            file_path: Caminho completo do arquivo
-            filename: Nome do arquivo no Anki
-
-        Returns:
-            True se adicionado com sucesso
-        """
-        try:
-            # Lê o arquivo em base64
-            import base64
-            with open(file_path, 'rb') as f:
-                data = base64.b64encode(f.read()).decode('utf-8')
-
-            # Envia para o Anki
-            self._invoke("storeMediaFile", filename=filename, data=data)
-            return True
-
-        except Exception as e:
-            print(f"  ✗ Erro ao adicionar mídia: {str(e)}")
-            return False
-
-    def create_card(
-        self,
-        deck_name: str,
-        front: str,
-        back: str,
-        tags: List[str]
-    ) -> Optional[int]:
-        """
-        Cria um card no Anki.
-
-        Args:
-            deck_name: Nome do deck
-            front: Conteúdo da frente do card (HTML)
-            back: Conteúdo do verso do card (HTML)
-            tags: Lista de tags
-
-        Returns:
-            ID do card criado ou None se falhar
-        """
-        try:
-            # Obtém os nomes dos campos do modelo
-            field_names = self.get_model_field_names()
-            front_field = field_names[0] if len(field_names) > 0 else "Frente"
-            back_field = field_names[1] if len(field_names) > 1 else "Verso"
-
-            note = {
-                "deckName": deck_name,
-                "modelName": self.card_model,
-                "fields": {
-                    front_field: front,
-                    back_field: back
-                },
-                "tags": tags,
-                "options": {
-                    "allowDuplicate": False
-                }
-            }
-
-            note_id = self._invoke("addNote", note=note)
-            return note_id
-
-        except Exception as e:
-            print(f"  ✗ Erro ao criar card: {str(e)}")
-            return None
-
-    def create_flashcards(
-        self,
-        word: str,
-        content: str,
-        image_filename: str,
-        deck_name: str,
-        tags: List[str]
-    ) -> List[int]:
-        """
-        Cria os 2 flashcards (imagem→palavra e palavra→imagem) para uma palavra.
-
-        Args:
-            word: Palavra em inglês
-            content: Conteúdo formatado do flashcard
-            image_filename: Nome do arquivo de imagem no Anki
-            deck_name: Nome do deck
-            tags: Lista de tags
-
-        Returns:
-            Lista com os IDs dos cards criados
-        """
-        from .card_formatter import CardFormatter
-        formatter = CardFormatter()
-
-        card_ids = []
-
-        # Card 1: Imagem → Palavra + Conteúdo
-        front_image = formatter.format_front_image(image_filename)
-        back_full = formatter.format_back(word, content, image_filename, include_image=False)
-
-        card_id_1 = self.create_card(deck_name, front_image, back_full, tags)
-        if card_id_1:
-            card_ids.append(card_id_1)
-            print(f"  ✓ Card 1 criado (Imagem → Palavra): ID {card_id_1}")
-
-        # Card 2: Palavra → Imagem + Conteúdo
-        front_word = formatter.format_front_word(word)
-        back_with_image = formatter.format_back(word, content, image_filename, include_image=True)
-
-        card_id_2 = self.create_card(deck_name, front_word, back_with_image, tags)
-        if card_id_2:
-            card_ids.append(card_id_2)
-            print(f"  ✓ Card 2 criado (Palavra → Imagem): ID {card_id_2}")
-
-        return card_ids
-
-    def _invoke(self, action: str, **params) -> any:
-        """
-        Invoca uma ação no AnkiConnect.
-
-        Args:
-            action: Nome da ação
-            **params: Parâmetros da ação
-
-        Returns:
-            Resultado da ação
+            Original inputs from matching notes.
 
         Raises:
-            Exception: Se houver erro na comunicação
+            AnkiConnectError: If the request or returned identity fields are invalid.
         """
-        payload = {
-            "action": action,
-            "version": 6,
-            "params": params
-        }
+        if not ITEM_ID_PATTERN.fullmatch(item_id):
+            raise AnkiConnectError("findNotes", "ItemId inv\u00e1lido")
+        note_ids = self._invoke("findNotes", query=f"ItemId:{item_id}")
+        if not isinstance(note_ids, list):
+            raise AnkiConnectError("findNotes", "findNotes n\u00e3o devolveu uma lista")
+        if not note_ids:
+            return []
 
-        try:
-            response = self.session.post(self.anki_url, json=payload, timeout=10)
-            response.raise_for_status()
+        notes = self._invoke("notesInfo", notes=note_ids)
+        if not isinstance(notes, list):
+            raise AnkiConnectError("notesInfo", "notesInfo n\u00e3o devolveu uma lista")
 
-            result = response.json()
+        exact = []
+        for note in notes:
+            try:
+                fields = note["fields"]
+                stored_id = fields["ItemId"]["value"]
+                stored_input = fields["Input"]["value"]
+            except (KeyError, TypeError) as exc:
+                raise AnkiConnectError("notesInfo", "Note V2 sem fields de identidade v\u00e1lidos") from exc
+            if stored_id == item_id:
+                exact.append(stored_input)
+        return exact
 
-            if len(result) != 2:
-                raise Exception(f"Resposta inválida do AnkiConnect")
+    def ensure_ready(self, profile: Profile, deck_name: str) -> None:
+        """Validate the deck and create-or-validate the fixed V2 note type.
 
-            if result.get("error") is not None:
-                raise Exception(result["error"])
+        Args:
+            profile: One of the two fixed V2 profiles.
+            deck_name: Existing disposable QA deck.
 
-            return result.get("result")
+        Raises:
+            AnkiConnectError: If the deck is missing or the note type contract drifts.
+        """
+        self._require_v2_profile(profile)
+        decks = self._invoke("deckNames")
+        if not isinstance(decks, list) or deck_name not in decks:
+            raise AnkiConnectError("deckNames", f"O deck configurado n\u00e3o existe: {deck_name}")
 
-        except requests.exceptions.ConnectionError:
-            raise Exception(
-                "Não foi possível conectar ao AnkiConnect. "
-                "Certifique-se de que o Anki está aberto e o AnkiConnect está instalado."
+        models = self._invoke("modelNames")
+        if not isinstance(models, list):
+            raise AnkiConnectError("modelNames", "modelNames n\u00e3o devolveu uma lista")
+        if profile.note_type not in models:
+            self._invoke(
+                "createModel",
+                modelName=profile.note_type,
+                inOrderFields=list(profile.fields),
+                css="",
+                isCloze=False,
+                cardTemplates=list(profile.card_templates),
             )
-        except requests.exceptions.Timeout:
-            raise Exception("Timeout ao comunicar com AnkiConnect")
-        except Exception as e:
-            raise Exception(f"Erro ao invocar AnkiConnect: {str(e)}")
+            return
+
+        fields = self._invoke("modelFieldNames", modelName=profile.note_type)
+        templates = self._invoke("modelTemplates", modelName=profile.note_type)
+        if fields != list(profile.fields) or templates != profile.templates:
+            raise AnkiConnectError(
+                "model_contract",
+                f"O note type existente diverge do contrato local: {profile.note_type}",
+            )
+
+    def prepare_qa_image(self, item_id: str, image_path: str | Path) -> tuple[str, str]:
+        """Validate the QA fixture and reject its deterministic filename if occupied.
+
+        Args:
+            item_id: Deterministic hexadecimal V2 item identifier.
+            image_path: Local PNG or JPEG fixture path.
+
+        Returns:
+            The deterministic filename and base64-encoded fixture bytes.
+
+        Raises:
+            AnkiConnectError: If the fixture is invalid or the filename is occupied.
+        """
+        if not ITEM_ID_PATTERN.fullmatch(item_id):
+            raise AnkiConnectError("retrieveMediaFile", "ItemId inv\u00e1lido")
+        path = Path(image_path)
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise AnkiConnectError(
+                "retrieveMediaFile",
+                f"N\u00e3o foi poss\u00edvel ler a fixture: {path}",
+            ) from exc
+
+        suffix = path.suffix.lower()
+        if suffix == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) > 8:
+            extension = "png"
+        elif suffix in {".jpg", ".jpeg"} and data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
+            extension = "jpg"
+        else:
+            raise AnkiConnectError(
+                "retrieveMediaFile",
+                "A fixture de QA n\u00e3o \u00e9 PNG ou JPEG v\u00e1lido",
+            )
+
+        filename = f"aa2_{item_id}_image.{extension}"
+        existing = self._invoke("retrieveMediaFile", filename=filename)
+        if existing is not False:
+            if not isinstance(existing, str):
+                raise AnkiConnectError(
+                    "retrieveMediaFile",
+                    "O AnkiConnect devolveu um resultado de m\u00eddia inv\u00e1lido",
+                )
+            raise AnkiConnectError(
+                "retrieveMediaFile",
+                f"M\u00eddia V2 j\u00e1 existe sem note correspondente: {filename}",
+            )
+        return filename, base64.b64encode(data).decode("ascii")
+
+    def store_qa_image(self, filename: str, encoded_data: str) -> str:
+        """Upload a QA image that already passed the read-only preflight.
+
+        Args:
+            filename: Deterministic V2 media filename.
+            encoded_data: Base64-encoded fixture bytes from prepare_qa_image.
+
+        Returns:
+            The filename confirmed by AnkiConnect.
+
+        Raises:
+            AnkiConnectError: If AnkiConnect does not confirm the upload.
+        """
+        stored = self._invoke(
+            "storeMediaFile",
+            filename=filename,
+            data=encoded_data,
+        )
+        if stored != filename:
+            raise AnkiConnectError(
+                "storeMediaFile",
+                "O AnkiConnect n\u00e3o confirmou o filename enviado",
+                outcome_uncertain=True,
+            )
+        return filename
+
+    def add_note(
+        self,
+        profile: Profile,
+        deck_name: str,
+        fields: dict[str, str],
+    ) -> int:
+        """Create one V2 note, which yields the profile's two card templates.
+
+        Args:
+            profile: One of the two fixed V2 profiles.
+            deck_name: Existing target deck.
+            fields: Ordered field mapping for the profile note type.
+
+        Returns:
+            Positive Anki note identifier.
+
+        Raises:
+            AnkiConnectError: If the payload or AnkiConnect result is invalid.
+        """
+        self._require_v2_profile(profile)
+        if tuple(fields) != profile.fields:
+            raise AnkiConnectError("addNote", "Fields n\u00e3o correspondem ao note type V2")
+        note = {
+            "deckName": deck_name,
+            "modelName": profile.note_type,
+            "fields": fields,
+            "tags": list(profile.tags),
+            "options": {"allowDuplicate": False},
+        }
+        note_id = self._invoke("addNote", note=note)
+        if type(note_id) is not int or note_id <= 0:
+            raise AnkiConnectError(
+                "addNote",
+                "O AnkiConnect n\u00e3o devolveu um note_id v\u00e1lido",
+                outcome_uncertain=True,
+            )
+        return note_id
+
+    @staticmethod
+    def _require_v2_profile(profile: Profile) -> None:
+        if profile not in V2_PROFILES:
+            raise AnkiConnectError("profile", "Somente note types V2 podem ser modificados")

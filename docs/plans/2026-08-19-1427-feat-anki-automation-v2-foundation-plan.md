@@ -2,20 +2,43 @@
 title: "Anki Automation V2 Foundation - Plan"
 type: feat
 date: 2026-08-19
+deepened: 2026-08-25
+revised: 2026-08-26
 topic: anki-automation-v2-foundation
 artifact_contract: ce-unified-plan/v1
-artifact_readiness: requirements-only
+artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
 execution: code
 ---
 
 # Anki Automation V2 Foundation - Plan
 
+## O que foi cortado
+
+Este plano trata o Anki Automation como ele é: um aplicativo pessoal, local e sequencial. A versão anterior tinha 11 unidades e mecanismos próprios de banco de dados, recuperação, autorização e operação. Eles não resolviam problemas proporcionais ao uso real.
+
+- Sai o ledger SQLite, junto com WAL, migrações de schema, snapshots e restore. O Anki será a fonte de existência dos itens V2; `processadas.json` continuará sendo apenas o índice read-only da V1.
+- Sai a máquina de estados com checkpoints de providers e mídia. Um item termina como criado, pulado ou erro; um resultado incerto encerra o lote e pede decisão humana.
+- Saem tokens de autorização, hashes de confirmação, reinicialização obrigatória do Anki e protocolos de reconciliação automática.
+- Saem auditorias recorrentes, fingerprints por lote, detecção de writers antigos e aprovação persistida. Haverá uma única auditoria read-only antes do uso real em inglês.
+- Saem data home privado, camadas próprias de backup, manifests de mídia, conteúdo endereçado por hash e retenção automatizada.
+- Saem HTTP, MCP, daemon, execução concorrente e action registry. ClaudeClaw receberá apenas uma entrada JSON síncrona sobre o mesmo fluxo da CLI.
+- Sai o framework genérico de perfis, plugins e providers. Haverá dois perfis fixos e pequenos adapters apenas para os provedores realmente usados.
+- Sai a recuperação automática de mídia órfã, notes incertas e falhas raras. O aplicativo para, diz o que sabe e não apaga nem repete nada por conta própria.
+- Saem japonês, história e qualquer preparação específica para tipos futuros. Eles só voltam quando houver um requisito real e um plano próprio.
+
+O resultado são três etapas. A primeira cabe em poucos dias ou poucas sessões focadas. Nenhuma etapa exige mudar cards ou dados antigos.
+
+---
+
 ## Goal Capsule
 
-- **Objective:** tornar o Anki Automation uma base confiavel para criar cards de ingles e espanhol, com audio controlado, operacao independente e integracao futura com o ClaudeClaw, sem perder os dados ou a capacidade atual.
-- **Product authority:** este plano cobre apenas a primeira entrega. Japones, fatos historicos e outros tipos de conhecimento aparecem como trabalhos relacionados, nao como escopo ativo.
-- **Open blockers:** nenhum antes do planejamento. As escolhas tecnicas pendentes estao classificadas como `Deferred to Planning`.
+- **Objective:** permitir que o usuário crie novos itens de inglês e espanhol latino-americano com dois sentidos de estudo e áudio, sem alterar o acervo existente nem gerar duplicatas silenciosas.
+- **Means:** evoluir a CLI Python atual com dois perfis concretos, respostas estruturadas, uma note com dois templates e uma entrada JSON simples, conforme as decisões técnicas abaixo.
+- **Authority:** o Product Contract governa o comportamento. As KTDs governam somente o mecanismo mínimo para cumpri-lo.
+- **Execution profile:** três etapas sequenciais, testes locais curtos e validação com o Anki aberto. Não há operação autônoma prolongada.
+- **Stop conditions:** parar se qualquer caminho puder atualizar ou apagar o legado, se uma mudança de formato parecer necessária ou se o resultado de `addNote` não for conhecido.
+- **User-owned tail:** o usuário escolhe a voz de cada idioma, fornece credenciais para smokes pagos e decide o que fazer se a auditoria local encontrar algo além das anomalias já conhecidas.
 
 ---
 
@@ -23,161 +46,348 @@ execution: code
 
 ### Summary
 
-A primeira entrega da V2 transforma o produto atual em um criador de cards configuravel para dois casos reais: vocabulario em ingles e frases de viagem em espanhol. Ela acrescenta audio somente aos cards novos, preserva o acervo existente e oferece tanto uso independente quanto uma entrada limpa para o ClaudeClaw.
+A V2 acrescenta dois fluxos reais ao aplicativo existente: vocabulário em inglês e frases de viagem em espanhol latino-americano geral. Cada item novo vira uma note nova do Anki que gera os dois sentidos de estudo. A mesma função serve à CLI e a uma entrada JSON futura do ClaudeClaw.
+
+Áudio é criado somente para notes V2 novas. O acervo V1 e seus arquivos permanecem intocados. Uma auditoria read-only confirma o estado real, mas não migra, corrige ou apaga nada.
 
 ### Problem Frame
 
-A V1 entrega um bom fluxo para vocabulario em ingles, mas suas regras de conteudo, imagem, configuracao e processamento estao ligadas a esse unico caso. Essa especializacao torna a inclusao do espanhol fragil e deixa a futura integracao com o ClaudeClaw dependente de detalhes internos.
+A V1 já cria cards úteis, porém depende de um prompt textual frágil, conhece apenas inglês e executa dois `addNote` independentes. Ela também trata qualquer erro de leitura de `processadas.json` como cache vazio, o que pode permitir duplicatas.
 
-O projeto tambem guarda um acervo ja produzido que nao pode ser tratado como descartavel. A V2 precisa evoluir o produto sem refazer cards existentes, sem adicionar audio retroativamente e sem transformar a ambicao de suportar outros conhecimentos em uma estrutura generica sem casos concretos.
-
-O estado local confirma 457 itens, mas nao representa cada item como um par confiavel. Existem 1.101 ocorrencias de identificadores para 973 identificadores unicos, um item registra 187 identificadores, outro registra quatro e ha uma imagem sem item correspondente. A criacao atual dos dois sentidos tambem usa operacoes separadas, portanto uma falha intermediaria pode deixar um resultado parcial.
+O problema atual não pede uma plataforma. Ele pede um caminho curto para acrescentar espanhol e áudio usando a integração Anthropic já existente, sem colocar os 457 registros antigos em risco.
 
 ### Key Decisions
 
-- **Entregar a visao em etapas.** (session-settled: user-approved — chosen over uma unica entrega com todo o escopo: reduz o risco e permite validar cada ampliacao com uso real.) Governs R1, R2.
-- **Validar a base com ingles e espanhol.** (session-settled: user-approved — chosen over uma plataforma universal desde o inicio: evita complexidade sem evidencia.) Governs R1, R2, R5.
-- **Adicionar audio somente aos cards novos.** (session-settled: user-directed — chosen over atualizar retroativamente o acervo: controla armazenamento e evita retrabalho em massa.) Governs R11, R12.
-- **Usar audio principal e no maximo um exemplo principal.** (session-settled: user-directed — chosen over narrar todos os exemplos: preserva o valor de pronuncia sem multiplicar os arquivos.) Governs R11, R13, R14.
-- **Manter cards de idioma automaticos e reservar revisao para historia.** (session-settled: user-directed — chosen over uma politica unica de aprovacao: mantem rapido o fluxo de idiomas e protege o conteudo historico.) Governs R10.
-- **Aceitar duas origens para historia no trabalho futuro.** (session-settled: user-directed — chosen over apenas material fornecido ou apenas pesquisa por tema: preserva flexibilidade e procedencia visivel.)
-- **Criar uma pergunta principal por fato historico no trabalho futuro.** (session-settled: user-directed — chosen over quantidade adaptativa ou multiplas perguntas fixas: reduz repeticao e mantem cada card focado.)
+- **Aplicar Pareto a um aplicativo pessoal.** (session-settled: user-directed — chosen over infraestrutura de plataforma: aproximadamente 80% do valor deve vir com cerca de 20% da complexidade.) Governs all defined requirements.
+- **Usar espanhol latino-americano geral.** (session-settled: user-directed — chosen over uma variante nacional: o perfil deve funcionar nas Américas sem foco em qualquer país.) Governs R1, R9.
+- **Escolher voz separadamente por idioma.** (session-settled: user-approved — chosen over um único fornecedor obrigatório: inglês e espanhol podem ter vencedores diferentes.) Governs R11, R14.
+- **Não presumir migração.** (session-settled: user-directed — chosen over substituir o armazenamento V1: o formato atual será preservado se continuar seguro como índice read-only.) Governs R15, R16.
+- **Falhar de forma clara.** (session-settled: user-directed — chosen over recuperação automática: um erro incomum encerra o lote, preserva o que já existe e devolve a decisão ao usuário.) Governs R18, R19.
 
 ### Requirements
 
-**Product shape**
+**Uso e entrada**
 
-- R1. A primeira entrega deve suportar dois perfis reais sem edicao de codigo: vocabulario em ingles e frases de viagem em espanhol.
-- R2. A configuracao deve expressar apenas variacoes comprovadas por esses perfis, mantendo aberta a ampliacao futura sem prometer suporte abstrato a qualquer tipo de conteudo.
-- R3. O produto deve continuar funcionando sozinho por linha de comando para uma entrada ou um lote.
-- R4. O produto deve oferecer uma entrada programatica com solicitacao, resultado e erros estruturados para uso futuro pelo ClaudeClaw.
+- R1. A entrega deve oferecer os perfis fixos `english_vocabulary` e `spanish_travel` sem prometer um sistema genérico de perfis.
+- R3. A aplicação deve aceitar um item ou um arquivo de itens pela CLI e nunca remover linhas do arquivo de entrada.
+- R4. A aplicação deve aceitar o mesmo pedido por JSON em stdin e devolver um único resultado JSON em stdout, pronto para futura chamada pelo ClaudeClaw.
 
-**Generation and profiles**
+**Conteúdo e estudo**
 
-- R5. O provedor de geracao de texto deve ser selecionavel por configuracao entre opcoes Anthropic e OpenAI que cumpram o mesmo contrato de resultado.
-- R6. O conteudo gerado deve seguir uma estrutura validavel, sem depender de titulos ou marcadores textuais para separar campos.
-- R7. Cada perfil deve definir seu objetivo de aprendizagem, conteudo esperado, midias aplicaveis, deck e etiquetas sem exigir alteracao da logica central.
+- R5. Nesta entrega, o texto deve usar somente a API direta da Anthropic já existente; a assinatura Claude não conta como credencial de API.
+- R6. A Anthropic deve devolver os campos estruturados do perfil, e a aplicação deve validá-los antes de gerar mídia ou chamar o Anki.
+- R8. Inglês deve preservar os sentidos comuns, IPA, classe gramatical, exemplos, apoio em português e imagem conceitual sem texto.
+- R9. Espanhol deve produzir frase, tradução em português, contexto e exemplo em espanhol latino-americano adequado às Américas; imagem em espanhol fica fora desta entrega.
 
-**Language card behavior**
+**Segurança do acervo e mídia**
 
-- R8. O perfil de ingles deve preservar dois sentidos de estudo, imagem conceitual sem texto e qualidade de conteudo igual ou melhor que a V1.
-- R9. O perfil de espanhol deve criar dois sentidos de estudo para frases de viagem, incluindo traducao e contexto de uso, com imagem opcional.
-- R10. Cards de idioma aprovados pelo proprio processamento devem entrar no Anki sem uma etapa manual de revisao previa.
-- R11. Cada card novo de idioma deve ter audio para a palavra ou frase principal e pode ter audio para um exemplo principal.
-- R12. Cards e registros existentes nao devem receber audio retroativamente nesta entrega.
-- R13. Os dois sentidos de estudo devem reutilizar as mesmas midias quando pertencem ao mesmo item.
-- R14. Antes de um lote com impacto material de midia, o produto deve mostrar uma estimativa simples do armazenamento adicional.
-
-**Data safety and reliability**
-
-- R15. Os 457 itens processados informados como estado atual devem ser preservados por migracao ou reconciliacao, nunca descartados.
-- R16. A migracao de estado nao deve alterar os cards que ja existem no Anki.
-- R17. O estado atual deve ser auditado antes de virar fonte confiavel, e inconsistencias devem ser expostas sem sobrescrita silenciosa.
-- R18. A criacao dos dois sentidos de estudo deve ser tratada como um unico resultado logico, sem marcar um item incompleto como concluido.
-- R19. Uma falha em um item nao deve impedir o restante do lote, mas deve deixar o item falho identificavel para nova tentativa segura.
-
-<!-- ce-section: work-relationships -->
-### How This Work Fits Together
-
-Este plano possui somente a fundacao e a primeira entrega de idiomas. A divisao abaixo e o entendimento atual e pode ser revista por planos futuros.
-
-- **Etapa 1 — fundacao, ingles e espanhol:** e o trabalho ativo deste plano.
-  - **Enables:** perfis posteriores reutilizam a entrada estruturada, o tratamento de midia, o estado seguro e a integracao externa.
-- **Etapa 2 — japones:** depende da fundacao e acrescenta escrita, leitura, significado, exemplos e audio de pronuncia.
-  - **Still to decide:** regras de transliteracao, escrita esperada e desenho exato dos sentidos de estudo.
-- **Etapa 3 — fatos historicos:** compartilha a base configuravel, mas acrescenta pesquisa com fontes e revisao humana obrigatoria antes do Anki.
-  - **Shares:** pode partir de material fornecido pelo usuario ou de pesquisa por tema com fontes visiveis.
-  - **Still to decide:** apresentacao de data, contexto, imagem ou mapa e formato da tela ou artefato de revisao.
-- **Etapa 4 — novos tipos de conhecimento:** depende de casos reais adicionais e nao deve criar um framework especulativo antes deles.
-
-### Actors
-
-- A1. **Usuario:** fornece itens ou lotes, escolhe o perfil e recebe resultados e falhas compreensiveis.
-- A2. **ClaudeClaw:** no futuro aciona o mesmo produto por uma entrada estruturada, sem conhecer seus detalhes internos.
-- A3. **Anki:** recebe notas, cards e midias e continua sendo o sistema de estudo.
-- A4. **Provedores externos:** geram texto, imagem ou audio sob contratos que o produto consegue validar.
-
-### Key Flows
-
-```mermaid
-flowchart TB
-  Start[Usuario ou ClaudeClaw fornece itens] --> Profile[Perfil seleciona o resultado de aprendizagem]
-  Profile --> Generate[Conteudo estruturado e validado]
-  Generate --> Media[Midias exigidas pelo perfil]
-  Media --> Anki[Dois sentidos de estudo no Anki]
-  Anki --> Result[Resultado estruturado e estado atualizado]
-```
-
-- F1. **Standalone language creation**
-  - **Trigger:** A1 solicita uma entrada ou lote com um perfil de idioma.
-  - **Actors:** A1, A3, A4.
-  - **Steps:** o produto valida a configuracao, gera o conteudo e as midias aplicaveis, cria os sentidos de estudo e registra o resultado.
-  - **Covered by:** R1, R3, R5-R14, R18, R19.
-- F2. **ClaudeClaw-ready creation**
-  - **Trigger:** A2 envia uma solicitacao estruturada.
-  - **Actors:** A2, A3, A4.
-  - **Steps:** o produto executa o mesmo fluxo de perfil e devolve sucesso ou falha em formato estruturado.
-  - **Covered by:** R4-R14, R18, R19.
-- F3. **Existing-state transition**
-  - **Trigger:** a V2 e preparada para usar o estado produzido pela V1.
-  - **Actors:** A1, A3.
-  - **Steps:** o produto inventaria o estado, aponta inconsistencias, preserva os cards existentes e somente entao estabelece o novo estado confiavel.
-  - **Covered by:** R15-R17.
+- R11. Toda note de produção criada pela V2 deve ter áudio principal e pode ter áudio para no máximo um exemplo; os fornecedores podem diferir por idioma.
+- R12. A aplicação não deve gerar áudio para cards, notes ou registros anteriores à V2.
+- R14. Antes de um lote, a aplicação deve mostrar uma estimativa simples de bytes de áudio e imagem e pedir uma confirmação sem token persistente.
+- R15. `processadas.json` deve permanecer byte a byte intocado e ser lido somente como lista de entradas inglesas conhecidas; nenhuma migração faz parte desta entrega.
+- R16. O código V2 não deve oferecer operações de update, delete, mudança de deck ou alteração de note type sobre o acervo antigo.
+- R18. Cada item novo deve usar uma note com dois templates, para que um único `addNote` produza os dois sentidos de estudo.
+- R19. Antes de qualquer chamada paga, a aplicação deve pular uma entrada já presente no Anki V2. Para inglês, também deve pular entradas presentes no legado; se o resultado da criação for incerto, deve parar sem retry automático.
 
 ### Acceptance Examples
 
-- AE1. **Covers R8, R10, R11, R13.** Dada uma nova palavra em ingles, quando o perfil conclui o processamento, entao o Anki recebe os dois sentidos com a imagem conceitual e o mesmo audio principal reutilizado.
-- AE2. **Covers R9-R11.** Dada uma nova frase de viagem em espanhol, quando a imagem esta desativada no perfil, entao os dois sentidos sao criados com traducao, contexto e audio sem exigir imagem ou revisao manual.
-- AE3. **Covers R12, R15, R16.** Dado um item ja processado antes da V2, quando o estado e migrado, entao seu card permanece inalterado e nenhum audio retroativo e criado.
-- AE4. **Covers R14.** Dado um lote com impacto material de midia, quando o usuario inicia o processamento, entao recebe antes uma estimativa compreensivel do espaco adicional.
-- AE5. **Covers R5, R6.** Dado outro provedor de texto configurado, quando ele produz conteudo valido, entao o restante do fluxo recebe a mesma estrutura esperada pelo perfil.
-- AE6. **Covers R17.** Dada uma inconsistencia entre o estado local e o Anki, quando a reconciliacao ocorre, entao o conflito e apresentado sem apagar ou substituir dados silenciosamente.
-- AE7. **Covers R18, R19.** Dada uma falha depois da criacao de apenas um sentido de estudo, quando o lote continua, entao o item nao e marcado como concluido e pode ser recuperado sem duplicacao silenciosa.
+- AE1. **Covers R8, R11, R18.** Uma palavra inglesa nova cria uma note V2, dois cards, uma imagem e o mesmo áudio principal compartilhado pelos templates.
+- AE2. **Covers R9, R11, R18.** Uma frase espanhola nova cria uma note V2 e dois cards com áudio, tradução e contexto, sem exigir imagem.
+- AE3. **Covers R15, R19.** Uma palavra encontrada em `processadas.json` é informada como `skipped_legacy`; nenhum provedor e nenhuma action mutável do Anki são chamados.
+- AE4. **Covers R18, R19.** Um timeout durante `addNote` encerra o lote com a entrada e a etapa identificadas; a aplicação não repete a criação nem remove mídia.
+- AE5. **Covers R4, R14.** Um lote JSON sem confirmação recebe a estimativa e `needs_confirmation`; o mesmo pedido com `confirmed: true` usa o fluxo da CLI sem prompt interativo.
 
 ### Success Criteria
 
-- O fluxo completo cria e verifica de duas a tres entradas reais de ingles e de duas a tres entradas reais de espanhol com o Anki aberto.
-- O perfil de ingles mantem a capacidade e a qualidade percebida da V1.
-- O perfil de espanhol produz cards uteis para as frases de viagem sem mudanca de codigo.
-- O mesmo pedido pode ser executado pela linha de comando e pela entrada preparada para o ClaudeClaw.
-- A troca entre provedores suportados exige configuracao, nao alteracao do fluxo de produto.
-- A migracao preserva o acervo existente e deixa inconsistencias conhecidas visiveis.
-- O planejamento quantifica o impacto de armazenamento do audio em lotes representativos antes de recomendar os padroes de qualidade.
+- Duas ou três entradas reais de cada idioma geram exatamente uma note e dois cards por item com o Anki aberto.
+- Repetir o mesmo pedido não aumenta a contagem de notes ou cards.
+- Inglês mantém os sentidos comuns e a imagem sem texto que dão valor à V1.
+- Espanhol soa geral para as Américas e não assume vocabulário de um país específico.
+- Todos os novos itens de produção têm áudio; nenhum item antigo recebe mídia nova.
+- CLI e JSON produzem o mesmo resultado lógico.
+- O hash de `processadas.json` e os arquivos de mídia V1 são iguais antes e depois dos testes; nenhuma action mutável recebe um note ID legado.
+- Um erro de provider, mídia ou Anki informa item, etapa e ação humana possível sem executar recuperação automática.
 
 ### Scope Boundaries
 
-- Japones, fatos historicos e outros tipos de conhecimento ficam fora da entrega ativa e serao planejados separadamente.
-- A integracao dentro do repositorio do ClaudeClaw fica fora de escopo; esta entrega prepara apenas o contrato de chamada.
-- Interface grafica, painel de metricas e um agente que modifica o proprio software ficam fora de escopo.
-- Audio retroativo para cards existentes fica fora de escopo.
-- A primeira entrega nao promete uma plataforma universal para qualquer formato de card.
+**Nesta entrega**
 
-### Dependencies and Assumptions
+- Dois perfis fixos, Anthropic para texto, Pollinations para imagem inglesa e o fornecedor de áudio escolhido por idioma.
+- CLI, JSON síncrono, criação sequencial e uma auditoria read-only do legado.
+- Novos note types V2; nenhuma reutilização ou edição do note type `Basic` existente.
 
-- O Anki Desktop com AnkiConnect continua disponivel para os testes finais com cards reais.
-- O acervo existente e o estado local podem conter inconsistencias e nao devem ser considerados autoritativos antes da reconciliacao.
-- O repositorio nao possui hoje uma suite automatizada de testes; o planejamento precisa estabelecer cobertura proporcional aos fluxos e a migracao.
-- As condicoes comerciais, limites e regras de uso de provedores e ferramentas de assinatura podem mudar e exigem pesquisa atual no planejamento.
-- Qualidade de audio significa pronuncia inteligivel para estudo; tamanho de arquivo e custo precisam ser avaliados junto com essa qualidade.
+**Adiado**
 
-### Outstanding Questions
+- Japonês, história, perfis definidos pelo usuário e provider plugins.
+- OpenAI como segundo provedor de texto, até existir benefício concreto; isso não limita uma escolha de OpenAI para áudio.
+- Integração dentro do ClaudeClaw, HTTP, MCP, daemon, paralelismo e lotes autônomos.
+- Qualquer reparo, limpeza, reconciliação ou mudança de formato do legado.
 
-**Deferred to Planning**
+**Fora do produto atual**
 
-- Qual combinacao de API direta e ferramentas de assinatura oferece o melhor equilibrio atual entre confiabilidade, custo, limites e termos de uso?
-- Qual provedor, formato e nivel de qualidade de audio entrega pronuncia adequada com crescimento de armazenamento aceitavel?
-- Qual modelo de nota e de templates do Anki preserva os dois sentidos de estudo e reduz resultados parciais?
-- Qual forma de armazenamento e migracao reconcilia o estado atual sem alterar cards existentes?
-- Qual fronteira de provedor de imagem preserva a qualidade atual e reduz o impacto de futuras mudancas externas?
+- Multiusuário, permissões por papel, alta disponibilidade, telemetria operacional, recuperação automática e backups mantidos pela aplicação.
+- Áudio retroativo e alteração de cards existentes.
+
+---
+
+## Planning Contract
+
+### Current Evidence
+
+| Evidência | Estado verificado | Consequência mínima |
+|---|---|---|
+| Código | `main.py` orquestra quatro módulos concretos e sequenciais | Reusar a estrutura plana; não criar service/repository/framework |
+| Criação | A V1 usa dois `addNote` independentes | Uma note V2 com dois templates remove a falha parcial provável |
+| Cache | `load_cache()` converte erro em `{}` e `--reset-cache` sobrescreve o arquivo | A V2 deve ler fail-closed e remover qualquer escrita no legado |
+| Legado | 457 chaves, 1.101 referências e 973 note IDs únicos | As chaves servem para bloquear duplicatas; os IDs não servem como pares |
+| Anomalias | 128 IDs compartilhados; `bout` tem 187; `yarn` tem quatro | Reportar, sem inferir propriedade, corrigir ou migrar |
+| Mídia V1 | 458 JPGs e 31,8 MiB; `injunction.jpg` é órfã | Manter tudo intocado; a V2 usa nomes próprios |
+| Testes | Não há suíte automatizada no repositório | Criar uma suíte curta com a biblioteca padrão |
+
+O formato V1 não precisa mudar. A V2 só precisa saber se uma entrada inglesa já é conhecida, e as 457 chaves respondem a essa pergunta. Os IDs anômalos seriam um problema para reconstruir pares ou editar cards, mas a V2 não fará nenhuma dessas coisas. Portanto, migrar o arquivo acrescentaria risco sem resolver um problema atual.
+
+O SHA-256 observado em 25 de agosto de 2026 foi `1e24255a94fe155dd67afde04882162febecc331c5c300dc89a82db5d5dfead8`. Ele pertence ao relatório de planejamento e não será hardcoded na aplicação. A auditoria local registra o hash encontrado antes e depois; se o JSON não puder ser lido, a criação inglesa para com erro.
+
+### Mecanismos mantidos e o problema de hoje
+
+| Mecanismo | Problema concreto e provável que resolve |
+|---|---|
+| Dois perfis fixos (KTD2) | Inglês e espanhol precisam de conteúdo e cards diferentes agora |
+| Output estruturado por API direta (KTD3) | O parser textual atual quebra quando o modelo muda formatação |
+| Leitura fail-closed do legado (KTD4) | Um JSON ausente ou inválido hoje é tratado como cache vazio |
+| `ItemId` + uma note/dois templates (KTD5) | A V1 pode criar só um dos dois sentidos ou repetir um item |
+| Nome V2 único por mídia (KTD6) | O filename atual deriva apenas da palavra e pode colidir ou sobrescrever |
+| Piloto pequeno de voz por idioma (KTD7) | A qualidade percebida varia por voz, idioma e fornecedor |
+| Falha sequencial e explícita (KTD9) | Continuar após resultado incerto pode esconder duplicata ou dano parcial |
+| Estimativa e confirmação simples (KTD10) | Um lote pode consumir espaço e API sem o usuário perceber antes |
+
+### Desenho técnico mínimo
+
+O aplicativo continua sendo um único processo local. CLI e JSON são apenas duas portas para o mesmo fluxo:
+
+```text
+CLI ou JSON -> processar item -> texto -> mídia -> AnkiConnect -> resultado
+                         |                         |
+                         +-- qualquer erro: parar + explicar
+```
+
+Antes de gastar ou criar qualquer coisa, o fluxo faz uma preflight curta:
+
+```text
+validar pedido -> procurar ItemId exato -> consultar legado, só em inglês -> conferir note type -> continuar
+        erro ou conflito -----------------------------------------------> parar
+```
+
+Não existe serviço de fundo, fila, banco da V2 ou processo de reconciliação.
+
+### Key Technical Decisions
+
+- KTD1. **Manter uma única função de processamento.** `main.py` continua como composition root; `--profile` combina com `--item` ou `--file`, e `--json` lê stdin. As duas entradas convertem o pedido para a mesma chamada síncrona. Logs humanos vão para stderr no modo JSON. Governs R3, R4.
+- KTD2. **Adicionar somente dois perfis concretos.** `modules/profiles.py` contém fields, prompts, tags, note types e defaults. A configuração escolhe deck, modelo Anthropic e voz para cada perfil; não há registry dinâmico ou linguagem de configuração. Governs R1, R8, R9.
+- KTD3. **Usar Structured Outputs da Anthropic com validação local pequena.** A integração existente retorna o schema do perfil. As duas validações concretas verificam campos, tipos, cardinalidade e strings vazias; não haverá protocolo universal de mensagens nem framework de schema. Governs R5, R6.
+- KTD4. **Não criar armazenamento operacional V2.** (session-settled: user-directed — chosen over SQLite ou novo JSON mutável: o Anki já informa se a note V2 existe, e o legado só precisa ser lido.) O caminho de `processadas.json` é configurável, read-only e consultado apenas por `english_vocabulary`. Suas chaves formam em memória uma blocklist com a mesma normalização de KTD5. Entradas de arquivo também são read-only. Governs R15, R19.
+- KTD5. **Usar um note type V2 por perfil, uma note por item e dois templates.** A entrada canônica usa Unicode NFC, trim, espaços internos colapsados e casefold. `ItemId` é o SHA-256 hexadecimal de `profile_id`, um byte NUL e essa entrada. A busca usa apenas esse hex seguro e confirma igualdade exata em `notesInfo`; um resultado exato pula e informa o `Input` já existente, enquanto múltiplos resultados param. `addNote` é a única criação dos dois sentidos. O deck configurado deve existir; a aplicação não cria nem reorganiza decks. Governs R8, R9, R16, R18, R19.
+- KTD6. **Manter mídia simples e isolada.** Imagem e áudio usam filenames `aa2_<ItemId>_<slot>.<ext>` e são enviados ao Anki a partir de arquivo temporário. Antes do upload, a resposta deve ter o MIME esperado, tamanho não trivial e assinatura JPEG, PNG ou MP3 reconhecível. Se o filename já existir sem a note correspondente, o item para e informa a colisão; não há overwrite nem limpeza automática. Governs R11, R12, R16, R19.
+- KTD7. **Escolher voz com um piloto pequeno e descartável.** OpenAI TTS e Amazon Polly geram, para cada idioma, no máximo oito utterances em uma voz candidata por provider. O usuário avalia amostras anonimizadas apenas por qualidade perceptiva. O relatório registra objetivamente preço vigente, sucessos e falhas observados, dependência operacional, latência e bytes. O código de comparação pode ser um script temporário fora do produto; somente o adapter vencedor de cada idioma entra na aplicação. Governs R11, R14.
+- KTD8. **Manter Pollinations como único gerador de imagem.** Inglês usa o endpoint atual `https://gen.pollinations.ai/image` e fixa `flux`, que continua disponível embora o default atual seja outro; espanhol não gera imagem nesta entrega. Falha terminal para o item, sem fallback para outro modelo ou provider. A chave vai em header de autorização, nunca na URL. Governs R8, R9.
+- KTD9. **Processar um item por vez e parar no primeiro erro.** O conector propaga um erro pequeno com `action` e `outcome_uncertain`. Erro declarado pelo AnkiConnect é definitivo; timeout, falha de transporte ou resposta inválida durante uma operação mutável (`createModel`, `storeMediaFile` ou `addNote`) é incerto. O resultado informa item, etapa e incerteza. Não há retry dessas operações, rollback, delete ou correção automática. Governs R16, R18, R19.
+- KTD10. **Confirmar lotes sem protocolo de autorização.** Para mais de um item, a CLI mostra a projeção e pergunta uma vez. JSON devolve `needs_confirmation` até receber o mesmo pedido com `confirmed: true`; não há token, hash ou estado persistido. Governs R4, R14.
+
+Credenciais vêm somente do ambiente: `ANTHROPIC_API_KEY`, `POLLINATIONS_API_KEY`, a cadeia padrão da AWS para Polly e `OPENAI_API_KEY` apenas ao avaliar ou usar OpenAI TTS. Arquivos versionados guardam apenas nomes de providers, modelos, decks e placeholders. stdout, stderr e relatórios nunca exibem chaves, headers ou URLs autenticadas. Isso evita o vazamento provável de segredos sem criar um sistema próprio de autorização.
+
+### Perfis mínimos
+
+| Aspecto | `english_vocabulary` | `spanish_travel` |
+|---|---|---|
+| Entrada | Palavra ou expressão inglesa | Frase ou intenção de viagem |
+| Output estruturado | `term`, `ipa`, `parts_of_speech`, `senses`, `visual_prompt_en` | `phrase_es`, `translation_pt_br`, `usage_context_pt_br`, `register`, `example_es`, `example_pt_br` |
+| Cardinalidade | Um ou mais sentidos comuns, ordenados por frequência contemporânea; cada sentido tem `definition_en`, `meaning_pt_br`, `example_en` e `example_pt_br` não vazios | Uma frase, uma tradução, um contexto, registro `neutral`, `informal` ou `formal`, e um exemplo bilíngue não vazio |
+| Frente 1 | Imagem | Tradução ou intenção em português |
+| Frente 2 | Palavra ou expressão | Frase em espanhol |
+| Mídia | Imagem; áudio de `term` e, quando habilitado, do primeiro `example_en` | Áudio de `phrase_es` e, quando habilitado, de `example_es`; sem imagem |
+| Locale | Inglês contemporâneo geral | Espanhol latino-americano geral, sem país-alvo |
+
+O note type inglês usa os fields, nesta ordem: `ItemId`, `Input`, `Term`, `IPA`, `PartsOfSpeech`, `SensesHtml`, `Image`, `MainAudio`, `ExampleAudio`. Seus templates finais são `Image to Term` e `Term to Meaning`. O primeiro revela termo, conteúdo e mídia sonora no verso; o segundo mostra termo e áudio principal na frente e revela imagem, sentidos e exemplo no verso.
+
+O note type espanhol usa: `ItemId`, `Input`, `PhraseEs`, `TranslationPtBr`, `UsageContextPtBr`, `Register`, `ExampleEs`, `ExamplePtBr`, `MainAudio`, `ExampleAudio`. Seus templates finais são `Portuguese to Spanish` e `Spanish to Portuguese`. O áudio só aparece no lado espanhol ou depois da resposta.
+
+U1 cria cada note type somente se ele não existir, já com os fields finais. Em toda execução, compara ordem dos fields, nomes dos templates e HTML de frente e verso com o contrato local. Qualquer desvio para antes das chamadas pagas; o aplicativo nunca edita um note type existente. Os dois templates usam os mesmos filenames da note, sem duplicar mídia.
+
+### Entrada JSON mínima
+
+```json
+{"profile":"spanish_travel","items":["Quero pedir a conta"],"confirmed":false}
+```
+
+O resultado possui apenas `status`, `estimate`, `created`, `skipped` e `error`. `status` pode ser `ok`, `needs_confirmation` ou `error`. Cada item criado devolve `item_id` e `note_id`; cada item pulado devolve `reason`. Em erro, `error` inclui item, etapa, mensagem e `outcome_uncertain`. Não existem actions separadas de auditoria, aprovação ou retry.
+
+### Estimativa de armazenamento
+
+O piloto parte de 4 a 12 segundos combinados de áudio por note e MP3 entre 64 e 128 kb/s: cerca de 32 a 192 KiB por item. Para inglês, a imagem V1 observada acrescenta de 55,8 KiB (mediana) a 172,3 KiB (p95).
+
+| Lote novo | Espanhol sem imagem | Inglês com imagem |
+|---:|---:|---:|
+| 1 item | 32-192 KiB | 88-364 KiB |
+| 100 itens | 3,1-18,8 MiB | 8,6-35,6 MiB |
+| 1.000 itens | 31-188 MiB | 86-356 MiB |
+
+Esses valores são uma faixa de planejamento. U3 substitui a parte de áudio por bytes reais das vozes escolhidas. O armazenamento de produção fica no media collection do Anki; a aplicação não mantém uma segunda cópia permanente.
+
+### Riscos conscientemente aceitos
+
+- Um timeout de `addNote` pode deixar uma note criada sem resposta conclusiva. A aplicação para e pede uma verificação pelo `ItemId`; não tenta resolver sozinha.
+- Uma falha após upload pode deixar mídia V2 órfã no Anki. O filename é informado, mas a aplicação não remove o arquivo automaticamente.
+- Uma indisponibilidade de Anthropic, OpenAI TTS, Pollinations, Polly ou AnkiConnect interrompe o lote. O usuário tenta novamente quando quiser.
+- Execuções concorrentes não são suportadas. O uso previsto é uma única CLI ou chamada ClaudeClaw por vez.
+- O piloto de oito utterances compara vozes, mas não prova confiabilidade estatística. O relatório diz apenas o que foi observado e usa preço oficial vigente.
+- O índice V1 pode pular um termo cujos cards já não existam. Esse falso positivo é preferível a recriar silenciosamente; o usuário decide qualquer exceção fora do fluxo automático.
+- A identidade bloqueia variantes que diferem apenas por maiúsculas, como `Polish` e `polish`. Esse falso positivo explícito é aceito para evitar duplicatas comuns; o usuário pode usar uma entrada mais específica se quiser estudar os dois sentidos.
+- A identidade impede a repetição da mesma entrada canônica, mas não tenta reconhecer paráfrases ou sinônimos como duplicatas. Fazer essa inferência exigiria complexidade e poderia bloquear itens legítimos.
+- A validação leve de MIME, tamanho e assinatura não detecta toda corrupção possível de mídia. A reprodução e renderização no deck de QA são o teste final; não serão adicionados decoders pesados para uma falha rara.
+- Uma edição manual em note type V2 bloqueia novas criações até o usuário decidir como proceder. A aplicação não repara templates.
+
+### Alternatives Rejected
+
+- **SQLite ou JSON mutável V2:** cria estado para reconciliar com outro estado; `ItemId` no Anki resolve a necessidade atual.
+- **Duas notes Basic por item:** mantém a janela real de criação parcial.
+- **Framework universal de perfis/providers:** não há terceiro caso concreto que justifique a abstração.
+- **`claude -p` ou `codex exec` como backend:** são ferramentas de agente e assinatura, não substitutos simples das APIs diretas.
+- **Migração ou correção do legado:** os IDs anômalos não são usados pelo novo fluxo; mudar o arquivo só adicionaria risco.
+- **Retry, rollback e reconciliação automáticos:** escondem incerteza justamente quando o usuário prefere parar e decidir.
+- **Fallback automático de voz, texto ou imagem:** pode mudar qualidade e custo sem consentimento.
+
+### Deferred User Decisions
+
+Estas escolhas não bloqueiam U1, mas precisam existir antes do uso real:
+
+- Escolher a voz vencedora de inglês após ouvir o piloto cego.
+- Escolher a voz vencedora de espanhol; ela pode usar outro provider.
+- Disponibilizar credenciais e autorizar o custo nominal dos smokes e do piloto.
+- Revisar o relatório local do legado antes de ativar criação inglesa nos decks reais.
 
 ### Sources and Research
 
-- `CLAUDE.md` — comportamento e restricoes documentados da V1.
-- `HANDOVER.md` — caso real de espanhol e direcao ainda nao implementada de perfis.
-- `roadmap.txt` — evolucao desejada para multiplas linguas e outros conhecimentos.
-- `main.py` — fluxo atual de entrada, processamento, midia, Anki e cache.
-- `modules/llm_provider.py` — geracao atual e dependencia de marcadores textuais.
-- `modules/anki_connector.py` — criacao atual dos dois sentidos de estudo.
-- `modules/image_provider.py` — comportamento atual de imagens e historico recente de mudanca externa.
-- `config/settings.example.json` — configuracao publica atual do projeto.
-- `docs/plans/2026-02-26-fix-update-dependencies-and-pollinations-api-plan.md` — precedente de migracao de provedor e teste real com Anki.
+Fontes oficiais consultadas ou revalidadas em 26 de agosto de 2026:
+
+- Código atual: `main.py`, `modules/llm_provider.py`, `modules/anki_connector.py`, `modules/image_provider.py` e `modules/card_formatter.py`.
+- [Anthropic Structured Outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) e [billing de assinatura versus API](https://support.claude.com/en/articles/9876003).
+- [OpenAI text-to-speech](https://developers.openai.com/api/docs/guides/text-to-speech), [API quickstart e credencial](https://developers.openai.com/api/docs/quickstart) e [API pricing](https://platform.openai.com/pricing).
+- [Anki: card types e reverse cards](https://docs.ankiweb.net/templates/generation.html#reverse-cards), [busca por field](https://docs.ankiweb.net/searching.html#limiting-to-a-field) e [media](https://docs.ankiweb.net/media.html).
+- [AnkiConnect upstream](https://git.sr.ht/~foosoft/anki-connect/tree/master/item/README.md) e [AnkiWeb add-on](https://ankiweb.net/shared/info/2055492159).
+- [Amazon Polly: voices](https://docs.aws.amazon.com/polly/latest/dg/available-voices.html), [languages](https://docs.aws.amazon.com/polly/latest/dg/supported-languages.html) e [pricing](https://aws.amazon.com/polly/pricing/).
+- [Pollinations API](https://github.com/pollinations/pollinations/blob/main/APIDOCS.md) e [model catalog](https://gen.pollinations.ai/image/models).
+
+---
+
+## Implementation Units
+
+### U1. Etapa 1 — Núcleo bilíngue funcional em deck de QA
+
+- **Goal:** criar e revisar cards de inglês e espanhol em um deck descartável, com uma note e dois sentidos, sem tocar no legado. Esta etapa valida conteúdo, identidade, templates e entrada JSON. Uma imagem-fixture local preenche o card inglês; áudio continua vazio. Cabe em poucos dias ou poucas sessões focadas.
+- **Requirements:** R1, R3, R4, R5, R6, R8, R9, R15, R16, R18, R19.
+- **Dependencies:** nenhuma.
+- **Files:** `main.py`, `run.sh`, `modules/profiles.py`, `modules/llm_provider.py`, `modules/anki_connector.py`, `modules/card_formatter.py`, `config/prompt_template.txt`, `config/spanish_prompt_template.txt`, `config/settings.example.json`, `tests/test_core_flow.py`, `tests/fixtures/qa-image.png`.
+- **Approach:**
+  1. Extrair do fluxo atual uma única função `process_item`; remover do executável `--reset-cache`, `save_cache()` e qualquer remoção de linhas de entrada. Reduzir `run.sh` a ativar o ambiente e repassar argumentos, sem banners, instalação ou validação própria.
+  2. Definir exatamente os dois schemas e os dois contratos finais de note type em `modules/profiles.py`.
+  3. Adaptar primeiro o provider Anthropic existente para Structured Outputs, sem criar uma hierarquia genérica de providers.
+  4. Calcular o `ItemId`, confirmar o resultado exato no Anki e, somente em inglês, comparar a entrada contra uma blocklist das 457 chaves normalizadas pelo mesmo canonicalizador. Fazer toda essa preflight antes do provider.
+  5. Criar os note types V2 somente se ausentes; se fields ou templates existentes divergirem, parar sem reparo. No QA inglês, enviar uma imagem-fixture local para que `Image to Term` seja um card real. Usar um único `addNote` por item.
+  6. Fazer CLI e JSON chamarem o mesmo fluxo; JSON nunca mistura logs humanos em stdout.
+- **Test scenarios:**
+  - JSON legado inválido ou ausente encerra inglês antes de qualquer provider ou action mutável, mas não bloqueia espanhol.
+  - O fluxo não abre `processadas.json` nem o arquivo de entrada em modo de escrita e não expõe `--reset-cache`.
+  - Entrada inglesa presente no legado retorna `skipped_legacy` e faz zero chamadas pagas, inclusive com variações de caixa, Unicode e espaços.
+  - A mesma entrada canônica produz o mesmo hash; `Polish` e `polish` colidem de propósito, e a segunda tentativa é pulada com o `Input` existente informado. A busca só pula depois de confirmar o field exato.
+  - Um `ItemId` exato retorna `skipped_v2`; dois resultados exatos param e explicam o conflito.
+  - Os dois schemas aceitam somente os campos e cardinalidades definidos; refusal ou campo vazio para antes do Anki. Sentidos ingleses adicionais continuam válidos quando seguem o mesmo schema.
+  - Note type ausente pode ser criado; divergência de field, ordem, template ou HTML para sem modificar o modelo.
+  - O conector não oferece update, delete ou mudança de deck; toda action mutável de teste usa apenas note types V2, mídia `aa2_` e um deck já existente.
+  - Cada operação mutável é chamada no máximo uma vez por item. Erro declarado é definitivo; timeout ou resposta inválida retorna `outcome_uncertain: true` e não dispara retry.
+  - A CLI direta e `run.sh` escrevem um único objeto em stdout no modo JSON, enquanto mensagens humanas vão para stderr.
+  - HTML vindo de input ou provider é escapado antes de chegar aos fields.
+- **Verification:** a suíte local passa e, com o Anki aberto, duas entradas por idioma geram uma note e dois cards no deck de QA. Inglês usa a fixture local; os fields de áudio ficam vazios. Repetir as quatro entradas não muda as contagens.
+
+### U2. Etapa 2 — Auditoria read-only do índice inglês
+
+- **Goal:** confirmar uma vez que o arquivo V1 pode continuar como blocklist read-only. A etapa produz informação para a ativação inglesa; não consulta nem altera cards e não condiciona o espanhol.
+- **Requirements:** R15, R16, R19.
+- **Dependencies:** U1.
+- **Files:** `scripts/audit_legacy.py`, `tests/test_legacy_audit.py`.
+- **Approach:**
+  1. Criar um script independente que abre `processadas.json` e `data/images/` somente para leitura e calcula agregados.
+  2. Na execução real, reproduzir 457 chaves, 1.101 referências, 973 IDs únicos, 128 compartilhados e 458 JPGs; mostrar separadamente `bout`, `yarn` e `injunction.jpg` sem inferir propriedade ou correção.
+  3. Gravar um único relatório local ignorado pelo Git e comparar o hash do JSON antes e depois. O relatório não lista os 973 IDs nem consulta cada note no Anki, porque o runtime não usa essa informação.
+- **Test scenarios:**
+  - Uma fixture pequena com ID compartilhado, quantidade incomum e imagem órfã prova os agregados sem copiar as 457 entradas para a suíte.
+  - O script não importa o conector do Anki e não abre o legado nem as imagens para escrita.
+  - JSON inválido ou diretório ausente encerra a auditoria com relatório parcial claro, sem criar ou corrigir nada.
+  - O relatório mostra IDs compartilhados e quantidades incomuns, mas nunca sugere que uma chave seja dona de um ID.
+- **Verification:** a execução cobre as 457 entradas e 458 imagens locais. O usuário recebe os agregados e discrepâncias, e o SHA-256 de `processadas.json` permanece igual. Se houver evidência nova, a ativação inglesa espera a decisão do usuário; o espanhol não é bloqueado.
+
+### U3. Etapa 3 — Áudio e ativação real
+
+- **Goal:** escolher uma voz por idioma e criar notes novas completas com mídia e estimativa simples.
+- **Requirements:** R3, R4, R8, R9, R11, R12, R14, R16, R18, R19.
+- **Dependencies:** U1. U2 bloqueia somente a ativação inglesa em deck real.
+- **Files:** `main.py`, `modules/image_provider.py`, `modules/audio_provider.py`, `requirements.txt`, `config/settings.example.json`, `tests/test_media_and_providers.py`, `docs/evaluations/audio-provider-bakeoff.md`, `README.md`, `CLAUDE.md`.
+- **Approach:**
+  1. Gerar o piloto cego em script descartável, registrar qualidade humana separada das medidas objetivas e obter uma escolha por idioma.
+  2. Implementar somente o adapter ou os dois adapters de áudio vencedores. Não manter código de candidato que não venceu idioma algum.
+  3. Baixar mídia em temporário, validar MIME, tamanho e assinatura, usar filenames por `ItemId` e enviar ao Anki. Pollinations atende somente o inglês.
+  4. Medir os bytes das vozes escolhidas, calcular a faixa do lote e aplicar a confirmação simples. Ler segredos somente do ambiente.
+  5. Validar primeiro em QA; depois ativar espanhol no deck real e inglês somente após a revisão de U2. Atualizar README e CLAUDE com o fluxo final.
+- **Test scenarios:**
+  - Uma note nova recebe áudio principal e no máximo um áudio de exemplo; item legado ou V2 pulado não chama TTS.
+  - MIME, tamanho ou assinatura inválida para antes de `storeMediaFile`; filename existente sem note correspondente não é sobrescrito.
+  - Os dois templates referenciam os mesmos filenames e a reprodução funciona nos lados definidos.
+  - Lote sem confirmação retorna estimativa; lote confirmado segue sem token ou estado persistido.
+  - Falha de texto, Pollinations ou TTS encerra o lote com provider e item identificados, sem fallback.
+  - Valores sentinela de todas as credenciais não aparecem em stdout, stderr, relatório nem URLs de erro.
+- **Verification:** smokes mínimos das APIs passam com custo previamente autorizado. O usuário aceita uma voz por idioma. Quatro entradas novas, duas de cada idioma, funcionam no deck de QA; depois, duas ou três entradas novas por idioma funcionam nos decks reais permitidos. Repetir os pedidos não muda as contagens, e o hash do legado inglês permanece igual.
+
+---
+
+## Verification Contract
+
+### Automated Gate
+
+- `python -m unittest discover -s tests -v` cobre os três arquivos de teste sem adicionar um framework de testes ao projeto.
+- Testes de unidade usam fakes para providers e AnkiConnect. Eles nunca chamam APIs pagas nem a coleção real.
+- Smokes de providers ficam separados e exigem credenciais e autorização de custo nominal.
+
+### Real Anki Gate
+
+1. Abrir o Anki com AnkiConnect e usar primeiro um deck de QA.
+2. Em U1, criar duas notes inglesas com a imagem-fixture e duas espanholas sem mídia; confirmar dois cards por note e os contratos finais de fields e templates.
+3. Repetir as mesmas entradas; confirmar zero notes ou cards adicionais. Fechar o Anki antes de outra entrada e confirmar erro claro antes de chamada paga.
+4. Em U2, revisar uma vez a auditoria local das 457 entradas. A decisão do usuário libera somente o inglês real.
+5. Em U3, usar quatro entradas novas no deck de QA, com áudio nos dois idiomas e imagem Pollinations no inglês; ouvir o áudio nos dois templates de cada idioma.
+6. Criar duas ou três notes espanholas no deck real. Criar as inglesas após a liberação de U2. Confirmar zero duplicatas, somente novos note IDs V2 e hash legado inalterado.
+
+### Requirement Traceability
+
+| Requirements | Primary unit | Evidence |
+|---|---|---|
+| R1, R3, R4, R9, R18 | U1 | Testes do fluxo e cards no deck de QA |
+| R5, R6 | U1 | Structured Outputs da Anthropic e validação dos schemas |
+| R8 | U1, U3 | Schema e templates ingleses; imagem-fixture em QA e Pollinations no fluxo completo |
+| R11, R12, R14 | U3 | Smokes, piloto cego, mídia e estimativa |
+| R15, R16 | U1, U2 | Ausência de escrita no legado e relatório local antes/depois |
+| R19 | U1, U2, U3 | Duplicatas, timeouts e falha explícita em cada fronteira |
+
+---
+
+## Definition of Done
+
+- O documento continua sendo o único plano da V2 e contém no máximo três unidades ativas.
+- `english_vocabulary` e `spanish_travel` passam nos testes locais e reais.
+- Cada note nova de produção gera exatamente dois cards e contém o áudio definido para seu idioma.
+- Repetir uma entrada legada ou V2 nunca cria uma duplicata silenciosa.
+- CLI e JSON usam o mesmo fluxo e retornam resultados equivalentes.
+- `processadas.json`, suas 457 chaves e as 458 imagens V1 permanecem inalterados; nenhuma action mutável recebe note IDs legados.
+- A auditoria conclui que o formato V1 pode continuar read-only ou, se encontrar nova evidência, para com um relatório; ela nunca aplica mudança.
+- O usuário escolhe uma voz aceitável por idioma com qualidade perceptiva cega e medidas objetivas separadas.
+- README e CLAUDE descrevem apenas o fluxo implementado, as estimativas e as limitações aceitas.
+- Não existem ledger V2, state machine, tokens, retry de operações mutáveis, recuperação automática, HTTP/MCP, daemon, paralelismo ou operações de update/delete sobre o legado.
+- Qualquer erro incomum deixa claro o que foi criado, o que pode ter sido criado e qual decisão permanece com o usuário.

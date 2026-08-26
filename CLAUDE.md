@@ -1,3 +1,5 @@
+> **V2 em execução:** `docs/plans/2026-08-19-1427-feat-anki-automation-v2-foundation-plan.md` governa o trabalho atual; as instruções V1 abaixo são históricas.
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.

@@ -1,12 +1,15 @@
 {
-  "anthropic_api_key": "YOUR_ANTHROPIC_API_KEY_HERE",
-  "deck_name": "English Words & Expressions",
-  "card_model": "Básico",
-  "default_tags": ["english"],
-  "image_provider": "pollinations",
   "anki_url": "http://localhost:8765",
-  "max_retries_image": 3,
-  "image_quality": "high",
-  "pollinations_api_key": "YOUR_POLLINATIONS_API_KEY_HERE",
-  "llm_model": "claude-sonnet-4-6"
+  "legacy_index_path": "data/processadas.json",
+  "qa_image_path": "tests/fixtures/qa-image.png",
+  "profiles": {
+    "english_vocabulary": {
+      "deck_name": "Anki Automation V2 QA",
+      "anthropic_model": "claude-sonnet-4-6"
+    },
+    "spanish_travel": {
+      "deck_name": "Anki Automation V2 QA",
+      "anthropic_model": "claude-sonnet-4-6"
+    }
+  }
 }

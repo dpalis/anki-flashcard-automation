@@ -1,0 +1,9 @@
+Transforme a intenção de viagem fornecida em uma frase natural de espanhol latino-americano geral.
+
+- Use espanhol adequado ao conjunto das Américas, sem assumir um país específico.
+- Prefira vocabulário amplamente compreendido e uma formulação natural, clara e útil em viagem.
+- Informe tradução em português do Brasil, contexto de uso, registro e um exemplo bilíngue.
+- O registro deve ser exatamente neutral, informal ou formal.
+- Não acrescente variantes nacionais se elas não forem necessárias para responder à entrada.
+
+Retorne apenas os campos exigidos pelo schema de structured output fornecido.

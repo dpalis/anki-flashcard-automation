@@ -1,134 +1,66 @@
-"""
-Módulo para formatação HTML dos flashcards do Anki.
-"""
+"""Small HTML formatter for the two V2 note types."""
+
+from __future__ import annotations
+
+from html import escape
+from typing import Any
+
+from .profiles import ENGLISH_VOCABULARY, SPANISH_TRAVEL, Profile
 
 
-class CardFormatter:
-    """
-    Formatador de conteúdo HTML para os cards do Anki.
-    """
+def _html(value: Any) -> str:
+    return escape(str(value), quote=True)
 
-    def format_front_image(self, image_filename: str) -> str:
-        """
-        Formata a frente do card com apenas a imagem.
 
-        Args:
-            image_filename: Nome do arquivo de imagem
+def _english_senses(content: dict[str, Any]) -> str:
+    rendered = []
+    for sense in content["senses"]:
+        rendered.append(
+            '<section class="sense">'
+            f'<div class="definition-en">{_html(sense["definition_en"])}</div>'
+            f'<div class="meaning-pt-br">{_html(sense["meaning_pt_br"])}</div>'
+            f'<div class="example-en">{_html(sense["example_en"])}</div>'
+            f'<div class="example-pt-br">{_html(sense["example_pt_br"])}</div>'
+            "</section>"
+        )
+    return "".join(rendered)
 
-        Returns:
-            HTML formatado para a frente do card
-        """
-        return f'<img src="{image_filename}" style="max-width: 100%; height: auto;">'
 
-    def format_front_word(self, word: str) -> str:
-        """
-        Formata a frente do card com apenas a palavra.
+def build_note_fields(
+    profile: Profile,
+    raw_input: str,
+    item_id: str,
+    content: dict[str, Any],
+    image_filename: str | None = None,
+) -> dict[str, str]:
+    """Build escaped Anki fields for the two fixed profiles."""
+    if profile is ENGLISH_VOCABULARY:
+        if not image_filename:
+            raise ValueError("O perfil ingl\u00eas requer a imagem-fixture de QA")
+        return {
+            "ItemId": item_id,
+            "Input": _html(raw_input),
+            "Term": _html(content["term"]),
+            "IPA": _html(content["ipa"]),
+            "PartsOfSpeech": " / ".join(_html(part) for part in content["parts_of_speech"]),
+            "SensesHtml": _english_senses(content),
+            "Image": f'<img src="{_html(image_filename)}">',
+            "MainAudio": "",
+            "ExampleAudio": "",
+        }
 
-        Args:
-            word: Palavra em inglês
+    if profile is SPANISH_TRAVEL:
+        return {
+            "ItemId": item_id,
+            "Input": _html(raw_input),
+            "PhraseEs": _html(content["phrase_es"]),
+            "TranslationPtBr": _html(content["translation_pt_br"]),
+            "UsageContextPtBr": _html(content["usage_context_pt_br"]),
+            "Register": _html(content["register"]),
+            "ExampleEs": _html(content["example_es"]),
+            "ExamplePtBr": _html(content["example_pt_br"]),
+            "MainAudio": "",
+            "ExampleAudio": "",
+        }
 
-        Returns:
-            HTML formatado para a frente do card
-        """
-        return f'<span style="color: #0000FF; font-weight: bold; font-size: 20px;">{word}</span>'
-
-    def format_back(
-        self,
-        word: str,
-        content: str,
-        image_filename: str,
-        include_image: bool = False
-    ) -> str:
-        """
-        Formata o verso do card com palavra, conteúdo e opcionalmente imagem.
-
-        Args:
-            word: Palavra em inglês
-            content: Conteúdo completo do flashcard
-            image_filename: Nome do arquivo de imagem
-            include_image: Se True, inclui a imagem no verso (Card 2: Palavra na frente)
-                          Se False, não inclui imagem (Card 1: Imagem na frente)
-
-        Returns:
-            HTML formatado para o verso do card
-        """
-        # Formata a palavra em azul, bold, 20px
-        word_html = f'<span style="color: #0000FF; font-weight: bold; font-size: 20px;">{word}</span>'
-
-        # Converte quebras de linha do conteúdo para HTML
-        content_html = self._format_content(content)
-
-        # Monta o verso baseado no tipo de card
-        back_parts = []
-
-        if include_image:
-            # Card 2: Palavra na frente → Verso tem: Imagem + Quebra simples + Conteúdo
-            back_parts.append(f'<img src="{image_filename}" style="max-width: 100%; height: auto;">')
-            back_parts.append('<br>')  # Uma quebra simples (não linha em branco)
-            back_parts.append(content_html)
-        else:
-            # Card 1: Imagem na frente → Verso tem: Palavra + Linha em branco + Conteúdo
-            back_parts.append(word_html)
-            back_parts.append('<br><br>')  # Linha em branco após palavra (2 <br> = linha vazia)
-            back_parts.append(content_html)
-
-        return ''.join(back_parts)
-
-    def _format_content(self, content: str) -> str:
-        """
-        Formata o conteúdo do flashcard, preservando quebras de linha e linhas em branco.
-
-        Args:
-            content: Conteúdo em texto plano
-
-        Returns:
-            HTML formatado
-        """
-        # Divide o conteúdo em linhas
-        lines = content.split('\n')
-
-        # Remove linhas vazias no início e fim
-        while lines and not lines[0].strip():
-            lines.pop(0)
-        while lines and not lines[-1].strip():
-            lines.pop()
-
-        # Agrupa o conteúdo em blocos (separados por linhas vazias)
-        blocks = []
-        current_block = []
-
-        for line in lines:
-            line = line.strip()
-            if line:
-                # Linha com conteúdo
-                escaped_line = self._escape_html(line)
-                current_block.append(escaped_line)
-            else:
-                # Linha vazia → termina o bloco atual
-                if current_block:
-                    blocks.append('<br>'.join(current_block))
-                    current_block = []
-
-        # Adiciona o último bloco se houver
-        if current_block:
-            blocks.append('<br>'.join(current_block))
-
-        # Junta blocos com linha em branco (<br><br>) entre eles
-        return '<br><br>'.join(blocks)
-
-    def _escape_html(self, text: str) -> str:
-        """
-        Escapa caracteres HTML especiais (mas mantém alguns símbolos úteis).
-
-        Args:
-            text: Texto para escapar
-
-        Returns:
-            Texto com caracteres escapados
-        """
-        # Não precisa escapar muito agressivamente, pois o Claude não gera HTML
-        # Apenas protege contra < > que poderiam quebrar a formatação
-        text = text.replace('<', '&lt;')
-        text = text.replace('>', '&gt;')
-
-        return text
+    raise ValueError(f"Perfil desconhecido: {profile.profile_id}")
