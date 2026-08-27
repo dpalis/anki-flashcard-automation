@@ -60,7 +60,7 @@ O problema atual não pede uma plataforma. Ele pede um caminho curto para acresc
 
 - **Aplicar Pareto a um aplicativo pessoal.** (session-settled: user-directed — chosen over infraestrutura de plataforma: aproximadamente 80% do valor deve vir com cerca de 20% da complexidade.) Governs all defined requirements.
 - **Usar espanhol latino-americano geral.** (session-settled: user-directed — chosen over uma variante nacional: o perfil deve funcionar nas Américas sem foco em qualquer país.) Governs R1, R9.
-- **Escolher voz separadamente por idioma.** (session-settled: user-approved — chosen over um único fornecedor obrigatório: inglês e espanhol podem ter vencedores diferentes.) Governs R11, R14.
+- **Usar `Iapetus` em inglês e espanhol dentro do Gemini.** (session-settled: user-approved — chosen after blind listening: a simplicidade operacional vale mais que manter vozes ou fornecedores diferentes.) Governs R11, R14.
 - **Não presumir migração.** (session-settled: user-directed — chosen over substituir o armazenamento V1: o formato atual será preservado se continuar seguro como índice read-only.) Governs R15, R16.
 - **Falhar de forma clara.** (session-settled: user-directed — chosen over recuperação automática: um erro incomum encerra o lote, preserva o que já existe e devolve a decisão ao usuário.) Governs R18, R19.
 
@@ -81,7 +81,7 @@ O problema atual não pede uma plataforma. Ele pede um caminho curto para acresc
 
 **Segurança do acervo e mídia**
 
-- R11. Toda note de produção criada pela V2 deve ter áudio principal e pode ter áudio para no máximo um exemplo; os fornecedores podem diferir por idioma.
+- R11. Toda note de produção criada pela V2 deve ter áudio principal e pode ter áudio para no máximo um exemplo; o Gemini com a voz `Iapetus` atende os dois idiomas nesta entrega.
 - R12. A aplicação não deve gerar áudio para cards, notes ou registros anteriores à V2.
 - R14. Antes de um lote, a aplicação deve mostrar uma estimativa simples de bytes de áudio e imagem e pedir uma confirmação sem token persistente.
 - R15. `processadas.json` deve permanecer byte a byte intocado e ser lido somente como lista de entradas inglesas conhecidas; nenhuma migração faz parte desta entrega.
@@ -112,14 +112,14 @@ O problema atual não pede uma plataforma. Ele pede um caminho curto para acresc
 
 **Nesta entrega**
 
-- Dois perfis fixos, Anthropic para texto, Pollinations para imagem inglesa e o fornecedor de áudio escolhido por idioma.
+- Dois perfis fixos, Anthropic para texto, Pollinations para imagem inglesa e Gemini para áudio, com voz escolhida por idioma.
 - CLI, JSON síncrono, criação sequencial e uma auditoria read-only do legado.
 - Novos note types V2; nenhuma reutilização ou edição do note type `Basic` existente.
 
 **Adiado**
 
 - Japonês, história, perfis definidos pelo usuário e provider plugins.
-- OpenAI como segundo provedor de texto, até existir benefício concreto; isso não limita uma escolha de OpenAI para áudio.
+- OpenAI como segundo provedor de texto, até existir benefício concreto.
 - Integração dentro do ClaudeClaw, HTTP, MCP, daemon, paralelismo e lotes autônomos.
 - Qualquer reparo, limpeza, reconciliação ou mudança de formato do legado.
 
@@ -157,7 +157,7 @@ O SHA-256 observado em 25 de agosto de 2026 foi `1e24255a94fe155dd67afde04882162
 | Leitura fail-closed do legado (KTD4) | Um JSON ausente ou inválido hoje é tratado como cache vazio |
 | `ItemId` + uma note/dois templates (KTD5) | A V1 pode criar só um dos dois sentidos ou repetir um item |
 | Nome V2 único por mídia (KTD6) | O filename atual deriva apenas da palavra e pode colidir ou sobrescrever |
-| Piloto pequeno de voz por idioma (KTD7) | A qualidade percebida varia por voz, idioma e fornecedor |
+| Piloto pequeno de voz por idioma (KTD7) | A qualidade percebida varia por voz e idioma |
 | Falha sequencial e explícita (KTD9) | Continuar após resultado incerto pode esconder duplicata ou dano parcial |
 | Estimativa e confirmação simples (KTD10) | Um lote pode consumir espaço e API sem o usuário perceber antes |
 
@@ -188,12 +188,12 @@ Não existe serviço de fundo, fila, banco da V2 ou processo de reconciliação.
 - KTD4. **Não criar armazenamento operacional V2.** (session-settled: user-directed — chosen over SQLite ou novo JSON mutável: o Anki já informa se a note V2 existe, e o legado só precisa ser lido.) O caminho de `processadas.json` é configurável, read-only e consultado apenas por `english_vocabulary`. Suas chaves formam em memória uma blocklist com a mesma normalização de KTD5. Entradas de arquivo também são read-only. Governs R15, R19.
 - KTD5. **Usar um note type V2 por perfil, uma note por item e dois templates.** A entrada canônica usa Unicode NFC, trim, espaços internos colapsados e casefold. `ItemId` é o SHA-256 hexadecimal de `profile_id`, um byte NUL e essa entrada. A busca usa apenas esse hex seguro e confirma igualdade exata em `notesInfo`; um resultado exato pula e informa o `Input` já existente, enquanto múltiplos resultados param. `addNote` é a única criação dos dois sentidos. O deck configurado deve existir; a aplicação não cria nem reorganiza decks. Governs R8, R9, R16, R18, R19.
 - KTD6. **Manter mídia simples e isolada.** Imagem e áudio usam filenames `aa2_<ItemId>_<slot>.<ext>` e são enviados ao Anki a partir de arquivo temporário. Antes do upload, a resposta deve ter o MIME esperado, tamanho não trivial e assinatura JPEG, PNG ou MP3 reconhecível. Se o filename já existir sem a note correspondente, o item para e informa a colisão; não há overwrite nem limpeza automática. Governs R11, R12, R16, R19.
-- KTD7. **Escolher voz com um piloto pequeno e descartável.** OpenAI TTS e Amazon Polly geram, para cada idioma, no máximo oito utterances em uma voz candidata por provider. O usuário avalia amostras anonimizadas apenas por qualidade perceptiva. O relatório registra objetivamente preço vigente, sucessos e falhas observados, dependência operacional, latência e bytes. O código de comparação pode ser um script temporário fora do produto; somente o adapter vencedor de cada idioma entra na aplicação. Governs R11, R14.
+- KTD7. **Escolher voz com um piloto pequeno e descartável.** `gemini-3.1-flash-tts-preview` gerou, para cada idioma, oito utterances com `Iapetus` e oito com `Erinome`, totalizando 32 amostras. Houve uma tentativa por clipe, sem retry; cada saída foi convertida para MP3 e o WAV temporário foi descartado imediatamente. A avaliação cega escolheu `Iapetus` para inglês e espanhol. O relatório separa qualidade perceptiva de preço, sucessos e falhas observados, latência e bytes. O código do piloto fica fora do produto; a aplicação recebe um único adapter Gemini com `Iapetus`. Governs R11, R14.
 - KTD8. **Manter Pollinations como único gerador de imagem.** Inglês usa o endpoint atual `https://gen.pollinations.ai/image` e fixa `flux`, que continua disponível embora o default atual seja outro; espanhol não gera imagem nesta entrega. Falha terminal para o item, sem fallback para outro modelo ou provider. A chave vai em header de autorização, nunca na URL. Governs R8, R9.
 - KTD9. **Processar um item por vez e parar no primeiro erro.** O conector propaga um erro pequeno com `action` e `outcome_uncertain`. Erro declarado pelo AnkiConnect é definitivo; timeout, falha de transporte ou resposta inválida durante uma operação mutável (`createModel`, `storeMediaFile` ou `addNote`) é incerto. O resultado informa item, etapa e incerteza. Não há retry dessas operações, rollback, delete ou correção automática. Governs R16, R18, R19.
 - KTD10. **Confirmar lotes sem protocolo de autorização.** Para mais de um item, a CLI mostra a projeção e pergunta uma vez. JSON devolve `needs_confirmation` até receber o mesmo pedido com `confirmed: true`; não há token, hash ou estado persistido. Governs R4, R14.
 
-Credenciais vêm somente do ambiente: `ANTHROPIC_API_KEY`, `POLLINATIONS_API_KEY`, a cadeia padrão da AWS para Polly e `OPENAI_API_KEY` apenas ao avaliar ou usar OpenAI TTS. Arquivos versionados guardam apenas nomes de providers, modelos, decks e placeholders. stdout, stderr e relatórios nunca exibem chaves, headers ou URLs autenticadas. Isso evita o vazamento provável de segredos sem criar um sistema próprio de autorização.
+Credenciais vêm somente do ambiente: `ANTHROPIC_API_KEY`, `POLLINATIONS_API_KEY` e `GEMINI_API_KEY`. Arquivos versionados guardam apenas nomes de providers, modelos, decks e placeholders. stdout, stderr e relatórios nunca exibem chaves, headers ou URLs autenticadas. Isso evita o vazamento provável de segredos sem criar um sistema próprio de autorização.
 
 ### Perfis mínimos
 
@@ -237,9 +237,9 @@ Esses valores são uma faixa de planejamento. U3 substitui a parte de áudio por
 
 - Um timeout de `addNote` pode deixar uma note criada sem resposta conclusiva. A aplicação para e pede uma verificação pelo `ItemId`; não tenta resolver sozinha.
 - Uma falha após upload pode deixar mídia V2 órfã no Anki. O filename é informado, mas a aplicação não remove o arquivo automaticamente.
-- Uma indisponibilidade de Anthropic, OpenAI TTS, Pollinations, Polly ou AnkiConnect interrompe o lote. O usuário tenta novamente quando quiser.
+- Uma indisponibilidade de Anthropic, Gemini TTS, Pollinations ou AnkiConnect interrompe o lote. O usuário tenta novamente quando quiser.
 - Execuções concorrentes não são suportadas. O uso previsto é uma única CLI ou chamada ClaudeClaw por vez.
-- O piloto de oito utterances compara vozes, mas não prova confiabilidade estatística. O relatório diz apenas o que foi observado e usa preço oficial vigente.
+- O piloto de oito utterances por voz compara qualidade perceptiva, mas não prova confiabilidade estatística. O relatório diz apenas o que foi observado e usa preço oficial vigente.
 - O índice V1 pode pular um termo cujos cards já não existam. Esse falso positivo é preferível a recriar silenciosamente; o usuário decide qualquer exceção fora do fluxo automático.
 - A identidade bloqueia variantes que diferem apenas por maiúsculas, como `Polish` e `polish`. Esse falso positivo explícito é aceito para evitar duplicatas comuns; o usuário pode usar uma entrada mais específica se quiser estudar os dois sentidos.
 - A identidade impede a repetição da mesma entrada canônica, mas não tenta reconhecer paráfrases ou sinônimos como duplicatas. Fazer essa inferência exigiria complexidade e poderia bloquear itens legítimos.
@@ -260,8 +260,6 @@ Esses valores são uma faixa de planejamento. U3 substitui a parte de áudio por
 
 Estas escolhas não bloqueiam U1, mas precisam existir antes do uso real:
 
-- Escolher a voz vencedora de inglês após ouvir o piloto cego.
-- Escolher a voz vencedora de espanhol; ela pode usar outro provider.
 - Disponibilizar credenciais e autorizar o custo nominal dos smokes e do piloto.
 - Revisar o relatório local do legado antes de ativar criação inglesa nos decks reais.
 
@@ -271,10 +269,9 @@ Fontes oficiais consultadas ou revalidadas em 26 de agosto de 2026:
 
 - Código atual: `main.py`, `modules/llm_provider.py`, `modules/anki_connector.py`, `modules/image_provider.py` e `modules/card_formatter.py`.
 - [Anthropic Structured Outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) e [billing de assinatura versus API](https://support.claude.com/en/articles/9876003).
-- [OpenAI text-to-speech](https://developers.openai.com/api/docs/guides/text-to-speech), [API quickstart e credencial](https://developers.openai.com/api/docs/quickstart) e [API pricing](https://platform.openai.com/pricing).
+- [Gemini text-to-speech](https://ai.google.dev/gemini-api/docs/speech-generation) e [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 - [Anki: card types e reverse cards](https://docs.ankiweb.net/templates/generation.html#reverse-cards), [busca por field](https://docs.ankiweb.net/searching.html#limiting-to-a-field) e [media](https://docs.ankiweb.net/media.html).
 - [AnkiConnect upstream](https://git.sr.ht/~foosoft/anki-connect/tree/master/item/README.md) e [AnkiWeb add-on](https://ankiweb.net/shared/info/2055492159).
-- [Amazon Polly: voices](https://docs.aws.amazon.com/polly/latest/dg/available-voices.html), [languages](https://docs.aws.amazon.com/polly/latest/dg/supported-languages.html) e [pricing](https://aws.amazon.com/polly/pricing/).
 - [Pollinations API](https://github.com/pollinations/pollinations/blob/main/APIDOCS.md) e [model catalog](https://gen.pollinations.ai/image/models).
 
 ---
@@ -333,7 +330,7 @@ Fontes oficiais consultadas ou revalidadas em 26 de agosto de 2026:
 - **Files:** `main.py`, `modules/image_provider.py`, `modules/audio_provider.py`, `requirements.txt`, `config/settings.example.json`, `tests/test_media_and_providers.py`, `docs/evaluations/audio-provider-bakeoff.md`, `README.md`, `CLAUDE.md`.
 - **Approach:**
   1. Gerar o piloto cego em script descartável, registrar qualidade humana separada das medidas objetivas e obter uma escolha por idioma.
-  2. Implementar somente o adapter ou os dois adapters de áudio vencedores. Não manter código de candidato que não venceu idioma algum.
+  2. Implementar um único adapter Gemini com `Iapetus` nos dois idiomas. Não criar uma abstração genérica de providers.
   3. Baixar mídia em temporário, validar MIME, tamanho e assinatura, usar filenames por `ItemId` e enviar ao Anki. Pollinations atende somente o inglês.
   4. Medir os bytes das vozes escolhidas, calcular a faixa do lote e aplicar a confirmação simples. Ler segredos somente do ambiente.
   5. Validar primeiro em QA; depois ativar espanhol no deck real e inglês somente após a revisão de U2. Atualizar README e CLAUDE com o fluxo final.
