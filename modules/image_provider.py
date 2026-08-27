@@ -1,4 +1,4 @@
-"""Concrete Pollinations adapter for English V2 images."""
+"""Concrete Pollinations adapter for V2 images."""
 
 from __future__ import annotations
 

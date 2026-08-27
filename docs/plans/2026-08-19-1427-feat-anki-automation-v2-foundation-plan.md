@@ -76,12 +76,12 @@ O problema atual não pede uma plataforma. Ele pede um caminho curto para acresc
 
 - R5. Nesta entrega, o texto deve usar somente a API direta da Anthropic já existente; a assinatura Claude não conta como credencial de API.
 - R6. A Anthropic deve devolver os campos estruturados do perfil, e a aplicação deve validá-los antes de gerar mídia ou chamar o Anki.
-- R8. Inglês deve preservar os sentidos comuns, IPA, classe gramatical, exemplos, apoio em português e imagem conceitual sem texto.
-- R9. Espanhol deve produzir frase, tradução em português, contexto e exemplo em espanhol latino-americano adequado às Américas; imagem em espanhol fica fora desta entrega.
+- R8. Inglês deve preservar somente os sentidos comuns, IPA, classe gramatical, um exemplo por sentido, apoio em português e imagem conceitual sem texto.
+- R9. Espanhol deve produzir a formulação cotidiana mais comum para o contexto, com sentidos comuns, IPA, registro, um exemplo por sentido, apoio em português e imagem conceitual sem texto, em espanhol latino-americano adequado às Américas.
 
 **Segurança do acervo e mídia**
 
-- R11. Toda note de produção criada pela V2 deve ter áudio principal e pode ter áudio para no máximo um exemplo; o Gemini com a voz `Iapetus` atende os dois idiomas nesta entrega.
+- R11. Toda note de produção criada pela V2 deve ter somente o áudio principal, ao final do verso; o Gemini com a voz `Iapetus` atende os dois idiomas nesta entrega.
 - R12. A aplicação não deve gerar áudio para cards, notes ou registros anteriores à V2.
 - R14. Antes de um lote, a aplicação deve mostrar uma estimativa simples de bytes de áudio e imagem e pedir uma confirmação sem token persistente.
 - R15. `processadas.json` deve permanecer byte a byte intocado e ser lido somente como lista de entradas inglesas conhecidas; nenhuma migração faz parte desta entrega.
@@ -92,7 +92,7 @@ O problema atual não pede uma plataforma. Ele pede um caminho curto para acresc
 ### Acceptance Examples
 
 - AE1. **Covers R8, R11, R18.** Uma palavra inglesa nova cria uma note V2, dois cards, uma imagem e o mesmo áudio principal compartilhado pelos templates.
-- AE2. **Covers R9, R11, R18.** Uma frase espanhola nova cria uma note V2 e dois cards com áudio, tradução e contexto, sem exigir imagem.
+- AE2. **Covers R9, R11, R18.** Uma frase espanhola nova cria uma note V2 e dois cards com imagem, áudio, sentidos comuns, exemplos e apoio em português.
 - AE3. **Covers R15, R19.** Uma palavra encontrada em `processadas.json` é informada como `skipped_legacy`; nenhum provedor e nenhuma action mutável do Anki são chamados.
 - AE4. **Covers R18, R19.** Um timeout durante `addNote` encerra o lote com a entrada e a etapa identificadas; a aplicação não repete a criação nem remove mídia.
 - AE5. **Covers R4, R14.** Um lote JSON sem confirmação recebe a estimativa e `needs_confirmation`; o mesmo pedido com `confirmed: true` usa o fluxo da CLI sem prompt interativo.
@@ -112,7 +112,7 @@ O problema atual não pede uma plataforma. Ele pede um caminho curto para acresc
 
 **Nesta entrega**
 
-- Dois perfis fixos, Anthropic para texto, Pollinations para imagem inglesa e Gemini para áudio, com voz escolhida por idioma.
+- Dois perfis fixos, Anthropic para texto, Pollinations para imagem nos dois idiomas e Gemini para áudio.
 - CLI, JSON síncrono, criação sequencial e uma auditoria read-only do legado.
 - Novos note types V2; nenhuma reutilização ou edição do note type `Basic` existente.
 
@@ -189,7 +189,7 @@ Não existe serviço de fundo, fila, banco da V2 ou processo de reconciliação.
 - KTD5. **Usar um note type V2 por perfil, uma note por item e dois templates.** A entrada canônica usa Unicode NFC, trim, espaços internos colapsados e casefold. `ItemId` é o SHA-256 hexadecimal de `profile_id`, um byte NUL e essa entrada. A busca usa apenas esse hex seguro e confirma igualdade exata em `notesInfo`; um resultado exato pula e informa o `Input` já existente, enquanto múltiplos resultados param. `addNote` é a única criação dos dois sentidos. O deck configurado deve existir; a aplicação não cria nem reorganiza decks. Governs R8, R9, R16, R18, R19.
 - KTD6. **Manter mídia simples e isolada.** Imagem e áudio usam filenames `aa2_<ItemId>_<slot>.<ext>` e são enviados ao Anki a partir de arquivo temporário. Antes do upload, a resposta deve ter o MIME esperado, tamanho não trivial e assinatura JPEG, PNG ou MP3 reconhecível. Se o filename já existir sem a note correspondente, o item para e informa a colisão; não há overwrite nem limpeza automática. Governs R11, R12, R16, R19.
 - KTD7. **Escolher voz com um piloto pequeno e descartável.** `gemini-3.1-flash-tts-preview` gerou, para cada idioma, oito utterances com `Iapetus` e oito com `Erinome`, totalizando 32 amostras. Houve uma tentativa por clipe, sem retry; cada saída foi convertida para MP3 e o WAV temporário foi descartado imediatamente. A avaliação cega escolheu `Iapetus` para inglês e espanhol. O relatório separa qualidade perceptiva de preço, sucessos e falhas observados, latência e bytes. O código do piloto fica fora do produto; a aplicação recebe um único adapter Gemini com `Iapetus`. Governs R11, R14.
-- KTD8. **Manter Pollinations como único gerador de imagem.** Inglês usa o endpoint atual `https://gen.pollinations.ai/image` e fixa `flux`, que continua disponível embora o default atual seja outro; espanhol não gera imagem nesta entrega. Falha terminal para o item, sem fallback para outro modelo ou provider. A chave vai em header de autorização, nunca na URL. Governs R8, R9.
+- KTD8. **Manter Pollinations como único gerador de imagem.** Os dois idiomas usam o endpoint atual `https://gen.pollinations.ai/image` com `flux`. O prompt condensa todos os significados apresentados em uma imagem coerente; se isso for impossível, usa o significado mais comum. Falha terminal para o item, sem fallback. A chave vai em header de autorização, nunca na URL. Governs R8, R9.
 - KTD9. **Processar um item por vez e parar no primeiro erro.** O conector propaga um erro pequeno com `action` e `outcome_uncertain`. Erro declarado pelo AnkiConnect é definitivo; timeout, falha de transporte ou resposta inválida durante uma operação mutável (`createModel`, `storeMediaFile` ou `addNote`) é incerto. O resultado informa item, etapa e incerteza. Não há retry dessas operações, rollback, delete ou correção automática. Governs R16, R18, R19.
 - KTD10. **Confirmar lotes sem protocolo de autorização.** Para mais de um item, a CLI mostra a projeção e pergunta uma vez. JSON devolve `needs_confirmation` até receber o mesmo pedido com `confirmed: true`; não há token, hash ou estado persistido. Governs R4, R14.
 
@@ -200,16 +200,14 @@ Credenciais vêm somente do ambiente: `ANTHROPIC_API_KEY`, `POLLINATIONS_API_KEY
 | Aspecto | `english_vocabulary` | `spanish_travel` |
 |---|---|---|
 | Entrada | Palavra ou expressão inglesa | Frase ou intenção de viagem |
-| Output estruturado | `term`, `ipa`, `parts_of_speech`, `senses`, `visual_prompt_en` | `phrase_es`, `translation_pt_br`, `usage_context_pt_br`, `register`, `example_es`, `example_pt_br` |
-| Cardinalidade | Um ou mais sentidos comuns, ordenados por frequência contemporânea; cada sentido tem `definition_en`, `meaning_pt_br`, `example_en` e `example_pt_br` não vazios | Uma frase, uma tradução, um contexto, registro `neutral`, `informal` ou `formal`, e um exemplo bilíngue não vazio |
-| Frente 1 | Imagem | Tradução ou intenção em português |
-| Frente 2 | Palavra ou expressão | Frase em espanhol |
-| Mídia | Imagem; áudio de `term` e, quando habilitado, do primeiro `example_en` | Áudio de `phrase_es` e, quando habilitado, de `example_es`; sem imagem |
+| Output estruturado | `term`, `ipa`, `parts_of_speech`, `senses`, `visual_prompt_en` | `phrase_es`, `ipa`, `register`, `senses`, `visual_prompt_en` |
+| Cardinalidade | Sentidos comuns em ordem de frequência; cada um tem `definition_en`, `meaning_pt_br` e `example_en` | Sentidos comuns da formulação cotidiana escolhida; cada um tem `definition_es`, `meaning_pt_br` e `example_es` |
+| Frente 1 | Palavra ou expressão em azul e bold | Frase em azul e bold |
+| Frente 2 | Imagem | Imagem |
+| Mídia | Imagem e áudio de `term` ao final do verso | Imagem e áudio de `phrase_es` ao final do verso |
 | Locale | Inglês contemporâneo geral | Espanhol latino-americano geral, sem país-alvo |
 
-O note type inglês usa os fields, nesta ordem: `ItemId`, `Input`, `Term`, `IPA`, `PartsOfSpeech`, `SensesHtml`, `Image`, `MainAudio`, `ExampleAudio`. Seus templates finais são `Image to Term` e `Term to Meaning`. O primeiro revela termo, conteúdo e mídia sonora no verso; o segundo mostra termo e áudio principal na frente e revela imagem, sentidos e exemplo no verso.
-
-O note type espanhol usa: `ItemId`, `Input`, `PhraseEs`, `TranslationPtBr`, `UsageContextPtBr`, `Register`, `ExampleEs`, `ExamplePtBr`, `MainAudio`, `ExampleAudio`. Seus templates finais são `Portuguese to Spanish` e `Spanish to Portuguese`. O áudio só aparece no lado espanhol ou depois da resposta.
+Os dois note types usam os fields, nesta ordem: `ItemId`, `Input`, `Target`, `ContentHtml`, `Image`, `MainAudio`. Seus templates finais são `Target to Meaning` e `Image to Target`. No primeiro, o verso começa pela imagem; no segundo, começa pelo target azul e bold. Ambos seguem com significados separados, um exemplo por significado, traduções, classificação, IPA e áudio ao final.
 
 U1 cria cada note type somente se ele não existir, já com os fields finais. Em toda execução, compara ordem dos fields, nomes dos templates e HTML de frente e verso com o contrato local. Qualquer desvio para antes das chamadas pagas; o aplicativo nunca edita um note type existente. Os dois templates usam os mesmos filenames da note, sem duplicar mídia.
 
@@ -223,13 +221,13 @@ O resultado possui apenas `status`, `estimate`, `created`, `skipped` e `error`. 
 
 ### Estimativa de armazenamento
 
-O piloto parte de 4 a 12 segundos combinados de áudio por note e MP3 entre 64 e 128 kb/s: cerca de 32 a 192 KiB por item. Para inglês, a imagem V1 observada acrescenta de 55,8 KiB (mediana) a 172,3 KiB (p95).
+O piloto parte de 4 a 12 segundos de áudio por note e MP3 entre 64 e 128 kb/s: cerca de 32 a 192 KiB por item. A imagem V1 observada acrescenta de 55,8 KiB (mediana) a 172,3 KiB (p95).
 
-| Lote novo | Espanhol sem imagem | Inglês com imagem |
-|---:|---:|---:|
-| 1 item | 32-192 KiB | 88-364 KiB |
-| 100 itens | 3,1-18,8 MiB | 8,6-35,6 MiB |
-| 1.000 itens | 31-188 MiB | 86-356 MiB |
+| Lote novo | Cada idioma com imagem |
+|---:|---:|
+| 1 item | 88-364 KiB |
+| 100 itens | 8,6-35,6 MiB |
+| 1.000 itens | 86-356 MiB |
 
 Esses valores são uma faixa de planejamento. U3 substitui a parte de áudio por bytes reais das vozes escolhidas. O armazenamento de produção fica no media collection do Anki; a aplicação não mantém uma segunda cópia permanente.
 
@@ -289,7 +287,7 @@ Fontes oficiais consultadas ou revalidadas em 26 de agosto de 2026:
   2. Definir exatamente os dois schemas e os dois contratos finais de note type em `modules/profiles.py`.
   3. Adaptar primeiro o provider Anthropic existente para Structured Outputs, sem criar uma hierarquia genérica de providers.
   4. Calcular o `ItemId`, confirmar o resultado exato no Anki e, somente em inglês, comparar a entrada contra uma blocklist das 457 chaves normalizadas pelo mesmo canonicalizador. Fazer toda essa preflight antes do provider.
-  5. Criar os note types V2 somente se ausentes; se fields ou templates existentes divergirem, parar sem reparo. No QA inglês, enviar uma imagem-fixture local para que `Image to Term` seja um card real. Usar um único `addNote` por item.
+  5. Criar os note types V2 somente se ausentes; se fields ou templates existentes divergirem, parar sem reparo. No QA, usar mídia-fixture para validar `Target to Meaning` e `Image to Target`. Usar um único `addNote` por item.
   6. Fazer CLI e JSON chamarem o mesmo fluxo; JSON nunca mistura logs humanos em stdout.
 - **Test scenarios:**
   - JSON legado inválido ou ausente encerra inglês antes de qualquer provider ou action mutável, mas não bloqueia espanhol.
@@ -331,11 +329,11 @@ Fontes oficiais consultadas ou revalidadas em 26 de agosto de 2026:
 - **Approach:**
   1. Gerar o piloto cego em script descartável, registrar qualidade humana separada das medidas objetivas e obter uma escolha por idioma.
   2. Implementar um único adapter Gemini com `Iapetus` nos dois idiomas. Não criar uma abstração genérica de providers.
-  3. Baixar mídia em temporário, validar MIME, tamanho e assinatura, usar filenames por `ItemId` e enviar ao Anki. Pollinations atende somente o inglês.
+  3. Baixar mídia em temporário, validar MIME, tamanho e assinatura, usar filenames por `ItemId` e enviar ao Anki. Pollinations atende os dois idiomas.
   4. Medir os bytes das vozes escolhidas, calcular a faixa do lote e aplicar a confirmação simples. Ler segredos somente do ambiente.
   5. Validar primeiro em QA; depois ativar espanhol no deck real e inglês somente após a revisão de U2. Atualizar README e CLAUDE com o fluxo final.
 - **Test scenarios:**
-  - Uma note nova recebe áudio principal e no máximo um áudio de exemplo; item legado ou V2 pulado não chama TTS.
+  - Uma note nova recebe somente áudio principal ao final do verso; item legado ou V2 pulado não chama TTS.
   - MIME, tamanho ou assinatura inválida para antes de `storeMediaFile`; filename existente sem note correspondente não é sobrescrito.
   - Os dois templates referenciam os mesmos filenames e a reprodução funciona nos lados definidos.
   - Lote sem confirmação retorna estimativa; lote confirmado segue sem token ou estado persistido.
@@ -356,10 +354,10 @@ Fontes oficiais consultadas ou revalidadas em 26 de agosto de 2026:
 ### Real Anki Gate
 
 1. Abrir o Anki com AnkiConnect e usar primeiro um deck de QA.
-2. Em U1, criar duas notes inglesas com a imagem-fixture e duas espanholas sem mídia; confirmar dois cards por note e os contratos finais de fields e templates.
+2. Em U1, criar duas notes inglesas e duas espanholas no deck de QA; confirmar dois cards por note e os contratos finais de fields e templates.
 3. Repetir as mesmas entradas; confirmar zero notes ou cards adicionais. Fechar o Anki antes de outra entrada e confirmar erro claro antes de chamada paga.
 4. Em U2, revisar uma vez a auditoria local das 457 entradas. A decisão do usuário libera somente o inglês real.
-5. Em U3, usar quatro entradas novas no deck de QA, com áudio nos dois idiomas e imagem Pollinations no inglês; ouvir o áudio nos dois templates de cada idioma.
+5. Em U3, usar quatro entradas novas no deck de QA, com áudio e imagem Pollinations nos dois idiomas; conferir o layout e ouvir o áudio no verso dos dois templates.
 6. Criar duas ou três notes espanholas no deck real. Criar as inglesas após a liberação de U2. Confirmar zero duplicatas, somente novos note IDs V2 e hash legado inalterado.
 
 ### Requirement Traceability
@@ -368,7 +366,7 @@ Fontes oficiais consultadas ou revalidadas em 26 de agosto de 2026:
 |---|---|---|
 | R1, R3, R4, R9, R18 | U1 | Testes do fluxo e cards no deck de QA |
 | R5, R6 | U1 | Structured Outputs da Anthropic e validação dos schemas |
-| R8 | U1, U3 | Schema e templates ingleses; imagem-fixture em QA e Pollinations no fluxo completo |
+| R8, R9 | U1, U3 | Schemas, templates compartilhados e imagem Pollinations nos dois idiomas |
 | R11, R12, R14 | U3 | Smokes, piloto cego, mídia e estimativa |
 | R15, R16 | U1, U2 | Ausência de escrita no legado e relatório local antes/depois |
 | R19 | U1, U2, U3 | Duplicatas, timeouts e falha explícita em cada fronteira |

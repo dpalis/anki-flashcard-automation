@@ -32,21 +32,25 @@ def english_content():
                 "definition_en": "To make a surface smooth and shiny.",
                 "meaning_pt_br": "Polir uma superfície.",
                 "example_en": "She polished the table carefully.",
-                "example_pt_br": "Ela poliu a mesa com cuidado.",
             }
         ],
-        "visual_prompt_en": "Hands polishing a plain wooden table, without text.",
+        "visual_prompt_en": "One coherent scene combining all common meanings, without text.",
     }
 
 
 def spanish_content():
     return {
         "phrase_es": "Quisiera pedir la cuenta, por favor.",
-        "translation_pt_br": "Gostaria de pedir a conta, por favor.",
-        "usage_context_pt_br": "Forma neutra e cortês adequada nas Américas.",
+        "ipa": "/kiˈsjeɾa peˈðiɾ la ˈkwenta poɾ faˈβoɾ/",
         "register": "neutral",
-        "example_es": "Disculpe, quisiera pedir la cuenta, por favor.",
-        "example_pt_br": "Com licença, gostaria de pedir a conta, por favor.",
+        "senses": [
+            {
+                "definition_es": "Una forma cortés y habitual de solicitar la cuenta.",
+                "meaning_pt_br": "Gostaria de pedir a conta, por favor.",
+                "example_es": "Disculpe, quisiera pedir la cuenta, por favor.",
+            }
+        ],
+        "visual_prompt_en": "A diner politely asking a server for the bill, without text.",
     }
 
 
@@ -492,26 +496,35 @@ class MediaFlowTests(unittest.TestCase):
         self.assertLess(events.index("audio"), events.index("store:.jpg"))
         fields = [call for call in anki.calls if call[0] == "addNote"][0][3]
         self.assertEqual(f"[sound:aa2_{item_id}_main.mp3]", fields["MainAudio"])
-        self.assertEqual("", fields["ExampleAudio"])
         self.assertEqual(1, len([call for call in anki.calls if call[0] == "addNote"]))
         self.assertEqual(7, result["metrics"]["anthropic"]["input_tokens"])
         self.assertEqual(5, result["metrics"]["gemini"]["audio_tokens"])
         self.assertEqual(0.002, result["metrics"]["pollinations"]["estimated_cost_usd"])
 
-    def test_spanish_generates_only_main_audio(self):
+    def test_spanish_generates_image_and_main_audio(self):
         text = FakeTextProvider(spanish_content())
         image = FakeImageProvider()
         audio = FakeAudioProvider()
         anki = FakeAnki()
         self.call("Quero pagar", "spanish_travel", text, image, audio, anki)
-        self.assertEqual([], image.calls)
+        item_id = item_id_for("spanish_travel", "Quero pagar")
+        self.assertEqual(
+            (
+                f"aa2_{item_id}_image.jpg",
+                f"aa2_{item_id}_image.png",
+                f"aa2_{item_id}_main.mp3",
+            ),
+            [call for call in anki.calls if call[0] == "media_preflight"][0][1],
+        )
+        self.assertEqual([spanish_content()["visual_prompt_en"]], image.calls)
         self.assertEqual(
             [("Quisiera pedir la cuenta, por favor.", "es-US")],
             audio.calls,
         )
         stored = [call[1] for call in anki.calls if call[0] == "store"]
-        self.assertEqual(1, len(stored))
-        self.assertTrue(stored[0].endswith("_main.mp3"))
+        self.assertEqual(2, len(stored))
+        self.assertTrue(stored[0].endswith("_image.jpg"))
+        self.assertTrue(stored[1].endswith("_main.mp3"))
 
     def test_image_failure_stops_before_audio_or_anki_mutation(self):
         class FailedImageProvider(FakeImageProvider):
@@ -543,7 +556,7 @@ class MediaFlowTests(unittest.TestCase):
 
         cases = (
             ("polish", "english_vocabulary", english_content(), FakeImageProvider()),
-            ("Quero pagar", "spanish_travel", spanish_content(), None),
+            ("Quero pagar", "spanish_travel", spanish_content(), FakeImageProvider()),
         )
         for item, profile_id, content, image in cases:
             with self.subTest(profile=profile_id):
@@ -651,13 +664,13 @@ class MediaFlowTests(unittest.TestCase):
 
 
 class EstimateAndConfirmationTests(unittest.TestCase):
-    def test_plan_storage_estimate_is_simple_and_profile_specific(self):
+    def test_both_profiles_estimate_image_and_audio_storage(self):
         self.assertEqual(
             {"items": 2, "min_bytes": 2 * 88 * 1024, "max_bytes": 2 * 364 * 1024},
             estimate_storage("english_vocabulary", 2),
         )
         self.assertEqual(
-            {"items": 2, "min_bytes": 2 * 32 * 1024, "max_bytes": 2 * 192 * 1024},
+            {"items": 2, "min_bytes": 2 * 88 * 1024, "max_bytes": 2 * 364 * 1024},
             estimate_storage("spanish_travel", 2),
         )
 
@@ -683,7 +696,7 @@ class EstimateAndConfirmationTests(unittest.TestCase):
         audio_constructor.assert_not_called()
         image_constructor.assert_not_called()
 
-    def test_confirmed_json_batch_runs_and_spanish_never_constructs_image_provider(self):
+    def test_confirmed_json_batch_constructs_image_provider_for_spanish(self):
         with tempfile.TemporaryDirectory() as tmp:
             settings = Path(tmp) / "settings.json"
             settings.write_text(
@@ -717,12 +730,17 @@ class EstimateAndConfirmationTests(unittest.TestCase):
                     {
                         "ANTHROPIC_API_KEY": "anthropic-secret",
                         "GEMINI_API_KEY": "gemini-secret",
+                        "POLLINATIONS_API_KEY": "pollinations-secret",
                     },
                     clear=True,
                 ),
                 patch.object(main_module, "ClaudeProvider", return_value=text),
                 patch.object(main_module, "GeminiAudioProvider", return_value=audio),
-                patch.object(main_module, "PollinationsImageProvider") as image_constructor,
+                patch.object(
+                    main_module,
+                    "PollinationsImageProvider",
+                    return_value=FakeImageProvider(),
+                ) as image_constructor,
                 patch.object(main_module, "AnkiConnector", return_value=anki),
                 patch.object(main_module.sys, "stdin", io.StringIO(request)),
                 redirect_stdout(stdout),
@@ -734,7 +752,7 @@ class EstimateAndConfirmationTests(unittest.TestCase):
         self.assertEqual(2, len(payload["created"]))
         self.assertEqual(2, len(text.calls))
         self.assertEqual(2, len(audio.calls))
-        image_constructor.assert_not_called()
+        image_constructor.assert_called_once_with("pollinations-secret")
 
     def test_configured_run_rejects_missing_keys_before_constructing_clients(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -765,6 +783,7 @@ class EstimateAndConfirmationTests(unittest.TestCase):
                 )
         self.assertEqual("error", result["status"])
         self.assertEqual("settings", result["error"]["stage"])
+        self.assertIn("POLLINATIONS_API_KEY", result["error"]["message"])
         text_constructor.assert_not_called()
         audio_constructor.assert_not_called()
         anki_constructor.assert_not_called()

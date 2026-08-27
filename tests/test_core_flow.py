@@ -48,10 +48,11 @@ def english_content(**overrides):
                 "definition_en": "To make a surface smooth and shiny.",
                 "meaning_pt_br": "Polir uma superf\u00edcie.",
                 "example_en": "She polished the table carefully.",
-                "example_pt_br": "Ela poliu a mesa com cuidado.",
             }
         ],
-        "visual_prompt_en": "Hands making a plain wooden surface shine, without text.",
+        "visual_prompt_en": (
+            "One coherent scene combining the common meanings of polish, without text."
+        ),
     }
     value.update(overrides)
     return value
@@ -60,11 +61,18 @@ def english_content(**overrides):
 def spanish_content(**overrides):
     value = {
         "phrase_es": "Quisiera pedir la cuenta, por favor.",
-        "translation_pt_br": "Gostaria de pedir a conta, por favor.",
-        "usage_context_pt_br": "Forma neutra e cort\u00eas adequada nas Am\u00e9ricas.",
+        "ipa": "/ki\u02c8sje\u027ea pe\u02c8\u00f0i\u027e la \u02c8kwenta po\u027e fa\u02c8\u03b2o\u027e/",
         "register": "neutral",
-        "example_es": "Disculpe, quisiera pedir la cuenta, por favor.",
-        "example_pt_br": "Com licen\u00e7a, gostaria de pedir a conta, por favor.",
+        "senses": [
+            {
+                "definition_es": "Una forma cort\u00e9s y habitual de solicitar la cuenta.",
+                "meaning_pt_br": "Gostaria de pedir a conta, por favor.",
+                "example_es": "Disculpe, quisiera pedir la cuenta, por favor.",
+            }
+        ],
+        "visual_prompt_en": (
+            "A diner politely asking a server for the bill, without text or numbers."
+        ),
     }
     value.update(overrides)
     return value
@@ -161,7 +169,6 @@ class SchemaTests(unittest.TestCase):
                 "definition_en": "To improve or refine something.",
                 "meaning_pt_br": "Aprimorar algo.",
                 "example_en": "He polished the final draft.",
-                "example_pt_br": "Ele aprimorou a vers\u00e3o final.",
             }
         )
         self.assertEqual(content, validate_profile_content(ENGLISH_VOCABULARY, content))
@@ -172,7 +179,27 @@ class SchemaTests(unittest.TestCase):
             (ENGLISH_VOCABULARY, english_content(senses=[])),
             (ENGLISH_VOCABULARY, english_content(term="   ")),
             (SPANISH_TRAVEL, spanish_content(register="regional")),
-            (SPANISH_TRAVEL, spanish_content(example_es="")),
+            (SPANISH_TRAVEL, spanish_content(senses=[])),
+            (SPANISH_TRAVEL, spanish_content(senses=["not an object"])),
+            (
+                SPANISH_TRAVEL,
+                spanish_content(
+                    senses=[{"definition_es": "Definición.", "meaning_pt_br": "Tradução."}]
+                ),
+            ),
+            (
+                SPANISH_TRAVEL,
+                spanish_content(
+                    senses=[
+                        {
+                            "definition_es": "   ",
+                            "meaning_pt_br": "Tradução.",
+                            "example_es": "Un ejemplo.",
+                        }
+                    ]
+                ),
+            ),
+            (SPANISH_TRAVEL, spanish_content(ipa="")),
             (SPANISH_TRAVEL, {**spanish_content(), "extra": "no"}),
             (SPANISH_TRAVEL, None),
         ]
@@ -283,7 +310,6 @@ class ProcessItemTests(unittest.TestCase):
         self.assertEqual(1, len(add_calls))
         fields = add_calls[0][3]
         self.assertTrue(fields["MainAudio"].startswith("[sound:aa2_"))
-        self.assertEqual("", fields["ExampleAudio"])
         self.assertTrue(fields["Image"].startswith('<img src="aa2_'))
         self.assertEqual(1234, result["note_id"])
         self.assertEqual(before, legacy.read_bytes())
@@ -354,22 +380,29 @@ class ProcessItemTests(unittest.TestCase):
         provider = FakeProvider(
             spanish_content(
                 phrase_es="<b>Hola & adi\u00f3s</b>",
-                usage_context_pt_br='Use em "caf\u00e9" <agora>.',
+                senses=[
+                    {
+                        "definition_es": 'Se usa en "caf\u00e9" <ahora>.',
+                        "meaning_pt_br": "Ol\u00e1 e adeus.",
+                        "example_es": "Hola & adi\u00f3s.",
+                    }
+                ],
             )
         )
         anki = FakeAnki()
         self.call("<script>alert('x')</script>", "spanish_travel", provider, anki)
         fields = [call for call in anki.calls if call[0] == "addNote"][0][3]
         self.assertEqual("&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;", fields["Input"])
-        self.assertEqual("&lt;b&gt;Hola &amp; adi\u00f3s&lt;/b&gt;", fields["PhraseEs"])
-        self.assertNotIn("<agora>", fields["UsageContextPtBr"])
+        self.assertEqual("&lt;b&gt;Hola &amp; adi\u00f3s&lt;/b&gt;", fields["Target"])
+        self.assertIn("&lt;ahora&gt;", fields["ContentHtml"])
+        self.assertNotIn("<ahora>", fields["ContentHtml"])
 
     def test_request_stops_on_first_error_and_keeps_prior_results(self):
         class FailsSecond(FakeProvider):
             def generate(self, profile, item):
                 self.calls.append((profile.profile_id, item))
                 if item == "bad":
-                    return spanish_content(example_es="")
+                    return spanish_content(senses=[])
                 return spanish_content(phrase_es=item)
 
         provider = FailsSecond(None)
@@ -415,21 +448,38 @@ class ProcessItemTests(unittest.TestCase):
 
 
 class ProfileAndFormattingTests(unittest.TestCase):
-    def test_field_order_and_template_names_are_final(self):
-        self.assertEqual(
-            ("ItemId", "Input", "Term", "IPA", "PartsOfSpeech", "SensesHtml", "Image", "MainAudio", "ExampleAudio"),
-            ENGLISH_VOCABULARY.fields,
-        )
-        self.assertEqual(("Image to Term", "Term to Meaning"), tuple(ENGLISH_VOCABULARY.templates))
-        self.assertEqual(
-            ("ItemId", "Input", "PhraseEs", "TranslationPtBr", "UsageContextPtBr", "Register", "ExampleEs", "ExamplePtBr", "MainAudio", "ExampleAudio"),
-            SPANISH_TRAVEL.fields,
-        )
-        self.assertEqual(("Portuguese to Spanish", "Spanish to Portuguese"), tuple(SPANISH_TRAVEL.templates))
+    def test_both_profiles_share_the_exact_two_card_contract(self):
+        expected_fields = ("ItemId", "Input", "Target", "ContentHtml", "Image", "MainAudio")
+        expected_templates = ("Target to Meaning", "Image to Target")
+        for profile in (ENGLISH_VOCABULARY, SPANISH_TRAVEL):
+            with self.subTest(profile=profile.profile_id):
+                self.assertEqual(expected_fields, profile.fields)
+                self.assertEqual(expected_templates, tuple(profile.templates))
 
-    def test_english_senses_are_rendered_as_escaped_html(self):
+                target_card = profile.templates["Target to Meaning"]
+                image_card = profile.templates["Image to Target"]
+                self.assertIn("color:#0000ff", target_card["Front"])
+                self.assertIn("font-weight:700", target_card["Front"])
+                self.assertEqual("{{Image}}", image_card["Front"])
+                self.assertIn("{{Image}}", target_card["Back"])
+                self.assertNotIn("{{Image}}", image_card["Back"])
+                self.assertIn("color:#0000ff", image_card["Back"])
+                self.assertNotIn("{{MainAudio}}", target_card["Front"])
+                self.assertNotIn("{{MainAudio}}", image_card["Front"])
+                self.assertTrue(target_card["Back"].rstrip().endswith("{{MainAudio}}</div>"))
+                self.assertTrue(image_card["Back"].rstrip().endswith("{{MainAudio}}</div>"))
+                self.assertNotIn("FrontSide", target_card["Back"] + image_card["Back"])
+
+    def test_common_meanings_examples_and_metadata_follow_the_reference_order(self):
         content = english_content()
         content["senses"][0]["definition_en"] = "A <clear> & useful definition."
+        content["senses"].append(
+            {
+                "definition_en": "To refine something until it is ready.",
+                "meaning_pt_br": "Aprimorar algo.",
+                "example_en": "He polished the final draft.",
+            }
+        )
         fields = build_note_fields(
             ENGLISH_VOCABULARY,
             "<input>",
@@ -438,8 +488,39 @@ class ProfileAndFormattingTests(unittest.TestCase):
             "aa2_" + "a" * 64 + "_image.png",
             "aa2_" + "a" * 64 + "_main.mp3",
         )
-        self.assertIn("A &lt;clear&gt; &amp; useful definition.", fields["SensesHtml"])
-        self.assertNotIn("<clear>", fields["SensesHtml"])
+        body = fields["ContentHtml"]
+        self.assertNotIn("<clear>", body)
+        expected_in_order = (
+            "A &lt;clear&gt; &amp; useful definition.",
+            "To refine something until it is ready.",
+            "Ex.: She polished the table carefully.",
+            "Ex.: He polished the final draft.",
+            "Polir uma superf\u00edcie. / Aprimorar algo.",
+            "Verb / Noun",
+            "/\u02c8p\u0252l\u026a\u0283/",
+        )
+        positions = [body.index(value) for value in expected_in_order]
+        self.assertEqual(sorted(positions), positions)
+        self.assertGreaterEqual(body.count('style="margin-top:1em;"'), 3)
+
+    def test_spanish_uses_the_same_body_model_with_register_as_classification(self):
+        content = spanish_content(ipa="[kiˈsjeɾa peˈðiɾ la ˈkwenta]")
+        fields = build_note_fields(
+            SPANISH_TRAVEL,
+            "Quero pedir a conta",
+            "b" * 64,
+            content,
+            "aa2_" + "b" * 64 + "_image.jpg",
+            "aa2_" + "b" * 64 + "_main.mp3",
+        )
+        self.assertEqual("Quisiera pedir la cuenta, por favor.", fields["Target"])
+        self.assertIn("Una forma cort\u00e9s y habitual", fields["ContentHtml"])
+        self.assertIn("Ex.: Disculpe, quisiera pedir la cuenta", fields["ContentHtml"])
+        self.assertIn("Gostaria de pedir a conta, por favor.", fields["ContentHtml"])
+        self.assertIn(">Neutral<", fields["ContentHtml"])
+        self.assertIn(">/kiˈsjeɾa peˈðiɾ la ˈkwenta/<", fields["ContentHtml"])
+        self.assertNotIn("/[", fields["ContentHtml"])
+        self.assertTrue(fields["Image"].startswith('<img src="aa2_'))
 
 
 class FakeResponse:
@@ -517,7 +598,7 @@ class AnkiConnectorTests(unittest.TestCase):
 
     def test_existing_model_drift_stops_without_repair(self):
         templates = copy.deepcopy(ENGLISH_VOCABULARY.templates)
-        templates["Image to Term"]["Front"] += "<!-- drift -->"
+        templates["Image to Target"]["Front"] += "<!-- drift -->"
         session = QueueSession(
             [ok(["QA"]), ok([ENGLISH_VOCABULARY.note_type]), ok(list(ENGLISH_VOCABULARY.fields)), ok(templates)]
         )
@@ -709,7 +790,7 @@ class AnthropicStructuredOutputTests(unittest.TestCase):
                 content=[
                     SimpleNamespace(
                         type="text",
-                        text=json.dumps(spanish_content(example_es="")),
+                        text=json.dumps(spanish_content(senses=[])),
                     )
                 ],
             ),
@@ -756,6 +837,27 @@ class AnthropicStructuredOutputTests(unittest.TestCase):
         self.assertIn("intenção", prompt)
         self.assertIn("Américas", prompt)
         self.assertNotIn("\\u", prompt)
+
+    def test_prompts_require_pareto_content_and_one_image_for_displayed_meanings(self):
+        english = (ROOT / "config" / "prompt_template.txt").read_text(encoding="utf-8")
+        spanish = (ROOT / "config" / "spanish_prompt_template.txt").read_text(encoding="utf-8")
+        for prompt in (english, spanish):
+            with self.subTest(prompt=prompt[:20]):
+                self.assertIn("significados apresentados", prompt)
+                self.assertIn("significado mais comum", prompt)
+                self.assertIn("uma única imagem coerente", prompt)
+                self.assertIn("sem texto", prompt)
+                self.assertIn("Para cada um dos significados apresentados", prompt)
+                self.assertIn("horário, data ou número exato", prompt)
+        self.assertIn("mais comum e útil no dia a dia", spanish)
+        self.assertIn("registro", spanish)
+        self.assertIn("não crie variantes", spanish.casefold())
+        self.assertIn("preserve-a exatamente", spanish)
+        self.assertIn("não a reformule", spanish)
+        self.assertIn("equivalentes curtos", english)
+        self.assertIn("equivalentes curtos", spanish)
+        self.assertIn("não repita", english)
+        self.assertIn("não repita", spanish)
 
 
 class CliContractTests(unittest.TestCase):

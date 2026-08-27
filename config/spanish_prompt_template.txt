@@ -1,9 +1,14 @@
 Transforme a intenção de viagem fornecida em uma frase natural de espanhol latino-americano geral.
 
 - Use espanhol adequado ao conjunto das Américas, sem assumir um país específico.
-- Prefira vocabulário amplamente compreendido e uma formulação natural, clara e útil em viagem.
-- Informe tradução em português do Brasil, contexto de uso, registro e um exemplo bilíngue.
+- Se a entrada já for uma frase natural em espanhol, preserve-a exatamente em `phrase_es`; não a reformule nem escreva números por extenso.
+- Escolha uma única formulação: a mais comum e útil no dia a dia para o contexto pedido. Se a forma informal for claramente mais corriqueira, prefira-a; use a formal somente quando ela for a escolha comum naquela situação. Não crie variantes de registro para a mesma entrada.
+- Inclua somente os sentidos comuns da frase, ordenados do mais comum para o menos comum.
+- Para cada sentido, escreva uma explicação curta em espanhol, equivalentes curtos em português do Brasil e exatamente um exemplo natural em espanhol. Em `meaning_pt_br`, dê somente a tradução ou sinônimos concisos; não repita a explicação.
+- Informe a escrita fonética em IPA.
 - O registro deve ser exatamente neutral, informal ou formal.
 - Não acrescente variantes nacionais se elas não forem necessárias para responder à entrada.
+- Escreva `visual_prompt_en` em inglês. Para cada um dos significados apresentados, descreva explicitamente um elemento visual que o represente e combine esses elementos em uma única imagem coerente. Somente quando a combinação for realmente impossível, represente o significado mais comum.
+- Não peça que a imagem mostre grafia, horário, data ou número exato. Represente a ideia visualmente, sem texto, letras, palavras, números, rótulos, telas, placas, relógios, calendários ou marcas parecidas com texto. Termine `visual_prompt_en` com essa proibição em inglês.
 
 Retorne apenas os campos exigidos pelo schema de structured output fornecido.

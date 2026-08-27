@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SETTINGS_FILE = BASE_DIR / "config" / "settings.json"
 STORAGE_BYTES_PER_ITEM = {
     "english_vocabulary": (88 * 1024, 364 * 1024),
-    "spanish_travel": (32 * 1024, 192 * 1024),
+    "spanish_travel": (88 * 1024, 364 * 1024),
 }
 POLLINATIONS_IMAGE_ESTIMATED_COST_USD = 0.002
 
@@ -154,11 +154,9 @@ def process_item(
     image_jpg = f"aa2_{item_id}_image.jpg"
     image_png = f"aa2_{item_id}_image.png"
     audio_filename = f"aa2_{item_id}_main.mp3"
-    media_candidates = [audio_filename]
-    if profile is ENGLISH_VOCABULARY:
-        media_candidates = [image_jpg, image_png, audio_filename]
-        if image_provider is None:
-            raise ProcessError("settings", "O provider de imagem inglesa não foi configurado")
+    media_candidates = [image_jpg, image_png, audio_filename]
+    if image_provider is None:
+        raise ProcessError("settings", "O provider de imagem não foi configurado")
     if audio_provider is None:
         raise ProcessError("settings", "O provider de áudio não foi configurado")
     _anki_call("media", anki.ensure_media_absent, media_candidates)
@@ -178,21 +176,19 @@ def process_item(
     if isinstance(text_usage, dict):
         metrics["anthropic"] = dict(text_usage)
 
-    image_filename = None
     prepared_media: list[tuple[str, bytes]] = []
-    if profile is ENGLISH_VOCABULARY:
-        try:
-            image_bytes, image_extension = image_provider.generate(content["visual_prompt_en"])
-        except Exception as exc:
-            raise ProcessError("image_provider", _redact_secrets(str(exc))) from exc
-        if image_extension not in {"jpg", "png"} or not isinstance(image_bytes, bytes):
-            raise ProcessError("image_provider", "A Pollinations devolveu mídia inválida")
-        image_filename = f"aa2_{item_id}_image.{image_extension}"
-        prepared_media.append((image_filename, image_bytes))
-        metrics["pollinations"] = {
-            "image_bytes": len(image_bytes),
-            "estimated_cost_usd": POLLINATIONS_IMAGE_ESTIMATED_COST_USD,
-        }
+    try:
+        image_bytes, image_extension = image_provider.generate(content["visual_prompt_en"])
+    except Exception as exc:
+        raise ProcessError("image_provider", _redact_secrets(str(exc))) from exc
+    if image_extension not in {"jpg", "png"} or not isinstance(image_bytes, bytes):
+        raise ProcessError("image_provider", "A Pollinations devolveu mídia inválida")
+    image_filename = f"aa2_{item_id}_image.{image_extension}"
+    prepared_media.append((image_filename, image_bytes))
+    metrics["pollinations"] = {
+        "image_bytes": len(image_bytes),
+        "estimated_cost_usd": POLLINATIONS_IMAGE_ESTIMATED_COST_USD,
+    }
 
     audio_text = content["term"] if profile is ENGLISH_VOCABULARY else content["phrase_es"]
     audio_locale = "en-US" if profile is ENGLISH_VOCABULARY else "es-US"
@@ -416,7 +412,7 @@ def _run_configured(profile_id: str, items: list[str], settings_path: Path) -> d
             missing_keys.append("ANTHROPIC_API_KEY")
         if not gemini_key:
             missing_keys.append("GEMINI_API_KEY")
-        if profile is ENGLISH_VOCABULARY and not pollinations_key:
+        if not pollinations_key:
             missing_keys.append("POLLINATIONS_API_KEY")
         if missing_keys:
             raise ProcessError(
@@ -428,10 +424,9 @@ def _run_configured(profile_id: str, items: list[str], settings_path: Path) -> d
             legacy_path = _resolve_setting_path(
                 settings_path, settings.get("legacy_index_path"), "legacy_index_path"
             )
-            image_provider = PollinationsImageProvider(pollinations_key)
         else:
             legacy_path = None
-            image_provider = None
+        image_provider = PollinationsImageProvider(pollinations_key)
         prompt_path = settings_path.parent / profile.prompt_filename
         provider = ClaudeProvider(anthropic_key, prompt_path, model)
         audio_provider = GeminiAudioProvider(gemini_key)
