@@ -1,3 +1,4 @@
+import base64
 import copy
 import hashlib
 import io
@@ -81,6 +82,24 @@ class FakeProvider:
         return self.content
 
 
+class FakeImageProvider:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def generate(self, prompt):
+        self.calls.append(prompt)
+        return b"\xff\xd8image\xff\xd9", "jpg"
+
+
+class FakeAudioProvider:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def generate(self, text, locale):
+        self.calls.append((text, locale))
+        return b"ID3-audio", {"mp3_bytes": 9}
+
+
 class FakeAnki:
     def __init__(self, existing=None, note_id=1234) -> None:
         self.existing = list(existing or [])
@@ -94,12 +113,11 @@ class FakeAnki:
     def ensure_ready(self, profile, deck_name):
         self.calls.append(("ensure_ready", profile.profile_id, deck_name))
 
-    def prepare_qa_image(self, item_id, image_path):
-        self.calls.append(("prepare_media", item_id, str(image_path)))
-        return f"aa2_{item_id}_image.png", "encoded-fixture"
+    def ensure_media_absent(self, filenames):
+        self.calls.append(("media_preflight", tuple(filenames)))
 
-    def store_qa_image(self, filename, encoded_data):
-        self.calls.append(("store_media", filename, encoded_data))
+    def store_media_file(self, filename, data):
+        self.calls.append(("store_media", filename, data))
         return filename
 
     def add_note(self, profile, deck_name, fields):
@@ -169,23 +187,31 @@ class ProcessItemTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.base = Path(self.temp_dir.name)
-        self.image = self.base / "qa-image.png"
-        self.image.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
 
     def write_legacy(self, content):
         path = self.base / "processadas.json"
         path.write_text(content, encoding="utf-8")
         return path
 
-    def call(self, item, profile_id, provider, anki, legacy_path=None):
+    def call(
+        self,
+        item,
+        profile_id,
+        provider,
+        anki,
+        legacy_path=None,
+        image_provider=None,
+        audio_provider=None,
+    ):
         return process_item(
             item,
             profile_id,
             provider=provider,
+            image_provider=image_provider or FakeImageProvider(),
+            audio_provider=audio_provider or FakeAudioProvider(),
             anki=anki,
             deck_name="Anki Automation V2 QA",
             legacy_path=legacy_path,
-            qa_image_path=self.image,
         )
 
     def test_missing_or_invalid_legacy_stops_english_before_mutation_or_provider(self):
@@ -199,7 +225,7 @@ class ProcessItemTests(unittest.TestCase):
                 self.assertEqual([], provider.calls)
                 self.assertFalse(
                     any(
-                        call[0] in {"ensure_ready", "prepare_media", "store_media", "addNote"}
+                        call[0] in {"ensure_ready", "media_preflight", "store_media", "addNote"}
                         for call in anki.calls
                     )
                 )
@@ -226,7 +252,7 @@ class ProcessItemTests(unittest.TestCase):
         self.assertEqual([], provider.calls)
         self.assertFalse(
             any(
-                call[0] in {"ensure_ready", "prepare_media", "store_media", "addNote"}
+                call[0] in {"ensure_ready", "media_preflight", "store_media", "addNote"}
                 for call in anki.calls
             )
         )
@@ -247,7 +273,7 @@ class ProcessItemTests(unittest.TestCase):
         self.assertEqual("identity", raised.exception.stage)
         self.assertEqual([], provider.calls)
 
-    def test_created_english_note_uses_one_add_note_and_empty_audio(self):
+    def test_created_english_note_uses_one_add_note_and_main_audio(self):
         legacy = self.write_legacy("{}")
         before = legacy.read_bytes()
         provider = FakeProvider(english_content())
@@ -256,7 +282,7 @@ class ProcessItemTests(unittest.TestCase):
         add_calls = [call for call in anki.calls if call[0] == "addNote"]
         self.assertEqual(1, len(add_calls))
         fields = add_calls[0][3]
-        self.assertEqual("", fields["MainAudio"])
+        self.assertTrue(fields["MainAudio"].startswith("[sound:aa2_"))
         self.assertEqual("", fields["ExampleAudio"])
         self.assertTrue(fields["Image"].startswith('<img src="aa2_'))
         self.assertEqual(1234, result["note_id"])
@@ -276,8 +302,8 @@ class ProcessItemTests(unittest.TestCase):
 
     def test_english_media_preflight_stops_before_provider(self):
         class MediaCollisionAnki(FakeAnki):
-            def prepare_qa_image(self, item_id, image_path):
-                self.calls.append(("prepare_media", item_id, str(image_path)))
+            def ensure_media_absent(self, filenames):
+                self.calls.append(("media_preflight", tuple(filenames)))
                 raise AnkiConnectError("retrieveMediaFile", "collision")
 
         provider = FakeProvider(english_content())
@@ -294,10 +320,11 @@ class ProcessItemTests(unittest.TestCase):
             "english_vocabulary",
             ["first", "never"],
             provider=provider,
+            image_provider=FakeImageProvider(),
+            audio_provider=FakeAudioProvider(),
             anki=anki,
             deck_name="QA",
             legacy_path=self.write_legacy("{}"),
-            qa_image_path=self.image,
         )
         self.assertEqual("error", result["status"])
         self.assertEqual("provider", result["error"]["stage"])
@@ -306,8 +333,8 @@ class ProcessItemTests(unittest.TestCase):
 
     def test_rejected_media_upload_stops_before_add_note(self):
         class RejectedMediaAnki(FakeAnki):
-            def store_qa_image(self, filename, encoded_data):
-                self.calls.append(("store_media", filename, encoded_data))
+            def store_media_file(self, filename, data):
+                self.calls.append(("store_media", filename, data))
                 raise AnkiConnectError("storeMediaFile", "filename mismatch")
 
         provider = FakeProvider(english_content())
@@ -351,10 +378,11 @@ class ProcessItemTests(unittest.TestCase):
             "spanish_travel",
             ["good", "bad", "never"],
             provider=provider,
+            image_provider=FakeImageProvider(),
+            audio_provider=FakeAudioProvider(),
             anki=anki,
             deck_name="QA",
             legacy_path=self.base / "missing.json",
-            qa_image_path=self.image,
         )
         self.assertEqual({"status", "estimate", "created", "skipped", "error"}, set(result))
         self.assertEqual("error", result["status"])
@@ -374,15 +402,16 @@ class ProcessItemTests(unittest.TestCase):
             "english_vocabulary",
             ["polish"],
             provider=FakeProvider(english_content()),
+            image_provider=FakeImageProvider(),
+            audio_provider=FakeAudioProvider(),
             anki=FailedAddAnki(),
             deck_name="QA",
             legacy_path=legacy,
-            qa_image_path=self.image,
         )
         self.assertEqual("error", result["status"])
         self.assertTrue(result["error"]["outcome_uncertain"])
         self.assertIn("ItemId=", result["error"]["message"])
-        self.assertIn("m\u00eddia enviada=aa2_", result["error"]["message"])
+        self.assertIn("m\u00eddias enviadas=aa2_", result["error"]["message"])
 
 
 class ProfileAndFormattingTests(unittest.TestCase):
@@ -407,6 +436,7 @@ class ProfileAndFormattingTests(unittest.TestCase):
             "a" * 64,
             content,
             "aa2_" + "a" * 64 + "_image.png",
+            "aa2_" + "a" * 64 + "_main.mp3",
         )
         self.assertIn("A &lt;clear&gt; &amp; useful definition.", fields["SensesHtml"])
         self.assertNotIn("<clear>", fields["SensesHtml"])
@@ -581,31 +611,36 @@ class AnkiConnectorTests(unittest.TestCase):
         for method in ("update_note", "delete_note", "change_deck", "create_deck"):
             self.assertFalse(hasattr(connector, method))
 
-    def test_qa_media_uses_aa2_name_and_refuses_collision(self):
+    def test_v2_media_preflight_and_store_use_aa2_names_and_refuse_collision(self):
         item_id = "b" * 64
-        with tempfile.TemporaryDirectory() as tmp:
-            image = Path(tmp) / "fixture.png"
-            image.write_bytes(b"\x89PNG\r\n\x1a\nvalid fixture")
-            filename = f"aa2_{item_id}_image.png"
-            session = QueueSession([ok(False), ok(filename)])
-            connector = AnkiConnector(session=session)
-            prepared = connector.prepare_qa_image(item_id, image)
-            self.assertEqual(filename, connector.store_qa_image(*prepared))
-            self.assertEqual(["retrieveMediaFile", "storeMediaFile"], [c["action"] for c in session.calls])
-            self.assertEqual(filename, session.calls[-1]["params"]["filename"])
+        filenames = (
+            f"aa2_{item_id}_image.jpg",
+            f"aa2_{item_id}_image.png",
+            f"aa2_{item_id}_main.mp3",
+        )
+        session = QueueSession([ok(False), ok(False), ok(False), ok(filenames[-1])])
+        connector = AnkiConnector(session=session)
+        connector.ensure_media_absent(filenames)
+        self.assertEqual(filenames[-1], connector.store_media_file(filenames[-1], b"ID3-audio"))
+        self.assertEqual(
+            ["retrieveMediaFile", "retrieveMediaFile", "retrieveMediaFile", "storeMediaFile"],
+            [c["action"] for c in session.calls],
+        )
+        encoded = session.calls[-1]["params"]["data"]
+        self.assertEqual(b"ID3-audio", base64.b64decode(encoded))
 
-            for existing in ("already-present", ""):
-                with self.subTest(existing=existing):
-                    collision = QueueSession([ok(existing)])
-                    with self.assertRaises(AnkiConnectError):
-                        AnkiConnector(session=collision).prepare_qa_image(item_id, image)
-                    self.assertEqual(["retrieveMediaFile"], [c["action"] for c in collision.calls])
+        for existing in ("already-present", ""):
+            with self.subTest(existing=existing):
+                collision = QueueSession([ok(existing)])
+                with self.assertRaises(AnkiConnectError):
+                    AnkiConnector(session=collision).ensure_media_absent([filenames[0]])
+                self.assertEqual(["retrieveMediaFile"], [c["action"] for c in collision.calls])
 
-            mismatch = QueueSession([ok("other.png")])
-            with self.assertRaises(AnkiConnectError) as raised:
-                AnkiConnector(session=mismatch).store_qa_image(filename, "encoded-fixture")
-            self.assertEqual("storeMediaFile", raised.exception.action)
-            self.assertTrue(raised.exception.outcome_uncertain)
+        mismatch = QueueSession([ok("other.mp3")])
+        with self.assertRaises(AnkiConnectError) as raised:
+            AnkiConnector(session=mismatch).store_media_file(filenames[-1], b"ID3-audio")
+        self.assertEqual("storeMediaFile", raised.exception.action)
+        self.assertTrue(raised.exception.outcome_uncertain)
 
     def test_store_media_transport_or_invalid_response_is_uncertain_and_not_retried(self):
         cases = [
@@ -616,19 +651,22 @@ class AnkiConnectorTests(unittest.TestCase):
             with self.subTest(response=response):
                 session = QueueSession([response])
                 with self.assertRaises(AnkiConnectError) as raised:
-                    AnkiConnector(session=session).store_qa_image("fixture.png", "encoded-fixture")
+                    AnkiConnector(session=session).store_media_file(
+                        f"aa2_{'c' * 64}_main.mp3",
+                        b"ID3-audio",
+                    )
                 self.assertEqual("storeMediaFile", raised.exception.action)
                 self.assertTrue(raised.exception.outcome_uncertain)
                 self.assertEqual(1, len(session.calls))
 
-    def test_invalid_qa_media_stops_before_anki(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            image = Path(tmp) / "fixture.png"
-            image.write_bytes(b"not an image")
-            session = QueueSession([])
-            with self.assertRaises(AnkiConnectError):
-                AnkiConnector(session=session).prepare_qa_image("c" * 64, image)
-            self.assertEqual([], session.calls)
+    def test_invalid_v2_media_stops_before_anki(self):
+        session = QueueSession([])
+        connector = AnkiConnector(session=session)
+        with self.assertRaises(AnkiConnectError):
+            connector.ensure_media_absent(["fixture.png"])
+        with self.assertRaises(AnkiConnectError):
+            connector.store_media_file(f"aa2_{'c' * 64}_main.mp3", b"")
+        self.assertEqual([], session.calls)
 
 
 class MessagesFake:
@@ -759,14 +797,11 @@ class CliContractTests(unittest.TestCase):
             settings_path.parent.mkdir()
             legacy = base / "processadas.json"
             legacy.write_text("{}", encoding="utf-8")
-            image = base / "qa-image.png"
-            image.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
             settings_path.write_text(
                 json.dumps(
                     {
                         "anki_url": "http://localhost:8765",
                         "legacy_index_path": str(legacy),
-                        "qa_image_path": str(image),
                         "profiles": {
                             "english_vocabulary": {
                                 "deck_name": "QA",
@@ -791,7 +826,26 @@ class CliContractTests(unittest.TestCase):
                     stdout = io.StringIO()
                     request = json.dumps({"profile": profile_id, "items": [item]})
                     with (
+                        patch.dict(
+                            main_module.os.environ,
+                            {
+                                "ANTHROPIC_API_KEY": "anthropic-secret",
+                                "GEMINI_API_KEY": "gemini-secret",
+                                "POLLINATIONS_API_KEY": "pollinations-secret",
+                            },
+                            clear=True,
+                        ),
                         patch.object(main_module, "ClaudeProvider", return_value=FakeProvider(content)),
+                        patch.object(
+                            main_module,
+                            "PollinationsImageProvider",
+                            return_value=FakeImageProvider(),
+                        ),
+                        patch.object(
+                            main_module,
+                            "GeminiAudioProvider",
+                            return_value=FakeAudioProvider(),
+                        ),
                         patch.object(main_module, "AnkiConnector", return_value=FakeAnki()),
                         patch.object(sys, "stdin", io.StringIO(request)),
                         redirect_stdout(stdout),
@@ -825,6 +879,14 @@ class CliContractTests(unittest.TestCase):
             )
             stdout = io.StringIO()
             with (
+                patch.dict(
+                    main_module.os.environ,
+                    {
+                        "ANTHROPIC_API_KEY": "anthropic-secret",
+                        "GEMINI_API_KEY": "gemini-secret",
+                    },
+                    clear=True,
+                ),
                 patch.object(main_module, "ClaudeProvider", return_value=FakeProvider(spanish_content())),
                 patch.object(main_module, "AnkiConnector", return_value=FakeAnki()),
                 patch.object(sys, "stdin", io.StringIO(request)),

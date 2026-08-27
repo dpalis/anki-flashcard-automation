@@ -1,152 +1,74 @@
-"""
-Módulo para geração de imagens conceituais usando Pollinations.ai.
-"""
+"""Concrete Pollinations adapter for English V2 images."""
 
-import time
-import urllib.parse
-from typing import Optional
-from pathlib import Path
+from __future__ import annotations
+
+from typing import Any
+from urllib.parse import quote
+
 import requests
 
 
+POLLINATIONS_ENDPOINT = "https://gen.pollinations.ai/image"
+POLLINATIONS_IMAGE_SIZE = 1024
+MIN_IMAGE_BYTES = 512
+
+
+class ImageProviderError(RuntimeError):
+    pass
+
+
 class PollinationsImageProvider:
-    """
-    Provider para geração de imagens usando a API do Pollinations.ai.
-    """
+    """Generate one validated Flux image without local persistence."""
 
-    def __init__(self, output_dir: str, max_retries: int = 3, quality: str = "high", api_key: str = ""):
-        """
-        Inicializa o provider de imagens.
+    def __init__(
+        self,
+        api_key: str | None,
+        *,
+        session: Any | None = None,
+        timeout: float = 60,
+    ) -> None:
+        self.api_key = api_key or ""
+        self.session = session or requests.Session()
+        self.timeout = timeout
 
-        Args:
-            output_dir: Diretório onde as imagens serão salvas
-            max_retries: Número máximo de tentativas para gerar imagem
-            quality: Qualidade da imagem (high, medium, low)
-            api_key: Chave de API do Pollinations.ai
-        """
-        self.output_dir = Path(output_dir)
-        self.max_retries = max_retries
-        self.quality = quality
-        self.api_key = api_key
-        self.base_url = "https://gen.pollinations.ai/image"
-        self.session = requests.Session()
+    def generate(self, prompt: str) -> tuple[bytes, str]:
+        """Return validated image bytes and their deterministic extension."""
+        if not self.api_key:
+            raise ImageProviderError("POLLINATIONS_API_KEY não está configurada")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ImageProviderError("O prompt visual não pode ser vazio")
 
-        # Cria o diretório se não existir
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        url = f"{POLLINATIONS_ENDPOINT}/{quote(prompt, safe='')}"
+        try:
+            response = self.session.get(
+                url,
+                params={
+                    "model": "flux",
+                    "width": POLLINATIONS_IMAGE_SIZE,
+                    "height": POLLINATIONS_IMAGE_SIZE,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Accept": "image/jpeg,image/png",
+                },
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise ImageProviderError(
+                f"Falha na API de imagem Pollinations: {self._redact(str(exc))}"
+            ) from exc
 
-    def generate_image(self, word: str, visual_concept: str) -> Optional[str]:
-        """
-        Gera uma imagem baseada no conceito visual e salva localmente.
+        data = response.content
+        content_type = str(response.headers.get("Content-Type") or "")
+        mime_type = content_type.split(";", 1)[0].strip().casefold()
+        if not isinstance(data, bytes) or len(data) < MIN_IMAGE_BYTES:
+            raise ImageProviderError("A Pollinations devolveu uma imagem vazia ou pequena demais")
+        if mime_type == "image/jpeg" and data.startswith(b"\xff\xd8\xff") and data.endswith(b"\xff\xd9"):
+            return data, "jpg"
+        if mime_type == "image/png" and data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return data, "png"
+        raise ImageProviderError("A Pollinations não devolveu JPEG ou PNG válido")
 
-        Args:
-            word: Palavra (usada para nomear o arquivo)
-            visual_concept: Descrição do conceito visual para gerar a imagem
-
-        Returns:
-            Caminho completo da imagem salva ou None se falhar
-
-        Raises:
-            Exception: Se todas as tentativas falharem
-        """
-        # Limpa o nome da palavra para usar como filename
-        safe_word = self._sanitize_filename(word)
-        output_path = self.output_dir / f"{safe_word}.jpg"
-
-        # Se já existe, retorna o caminho
-        if output_path.exists():
-            print(f"  ⚠ Imagem já existe: {output_path}")
-            return str(output_path)
-
-        # Tenta gerar a imagem com retries
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                print(f"  📸 Gerando imagem (tentativa {attempt}/{self.max_retries})...")
-
-                # Adiciona instruções extras para evitar texto
-                enhanced_concept = self._enhance_concept_for_no_text(visual_concept)
-
-                # Gera URL da imagem
-                image_url = self._build_image_url(enhanced_concept)
-
-                # Faz o download da imagem
-                response = self.session.get(image_url, timeout=30)
-                response.raise_for_status()
-
-                # Salva a imagem
-                with open(output_path, 'wb') as f:
-                    f.write(response.content)
-
-                print(f"  ✓ Imagem salva: {output_path}")
-                return str(output_path)
-
-            except requests.exceptions.RequestException as e:
-                error_msg = str(e).replace(self.api_key, '***') if self.api_key else str(e)
-                print(f"  ✗ Erro ao baixar imagem (tentativa {attempt}): {error_msg}")
-
-                if attempt < self.max_retries:
-                    # Aguarda antes de tentar novamente
-                    time.sleep(2)
-                else:
-                    raise Exception(f"Falha ao gerar imagem após {self.max_retries} tentativas")
-
-        return None
-
-    def _build_image_url(self, concept: str) -> str:
-        """
-        Constrói a URL da API do Pollinations.ai.
-
-        Args:
-            concept: Conceito visual para gerar
-
-        Returns:
-            URL completa para requisição
-        """
-        encoded_concept = urllib.parse.quote(concept)
-
-        params = {
-            "model": "flux",
-            "nologo": "true",
-        }
-        if self.api_key:
-            params["key"] = self.api_key
-        sizes = {"high": "1024", "medium": "768"}
-        size = sizes.get(self.quality, "512")
-        params.update({"width": size, "height": size})
-
-        query_string = urllib.parse.urlencode(params)
-        return f"{self.base_url}/{encoded_concept}?{query_string}"
-
-    def _enhance_concept_for_no_text(self, concept: str) -> str:
-        """
-        Adiciona instruções explícitas ao conceito para evitar texto nas imagens.
-
-        Args:
-            concept: Conceito visual original
-
-        Returns:
-            Conceito aprimorado com instruções anti-texto
-        """
-        no_text_instructions = (
-            "IMPORTANT: No text, no words, no letters, no numbers, no symbols, "
-            "no signs, no labels, no typography of any kind. Pure visual concept only. "
-        )
-
-        return f"{no_text_instructions}{concept}"
-
-    def _sanitize_filename(self, word: str) -> str:
-        """
-        Sanitiza o nome da palavra para usar como filename.
-
-        Args:
-            word: Palavra original
-
-        Returns:
-            Nome de arquivo seguro
-        """
-        # Remove caracteres especiais e espaços
-        safe = word.lower().strip()
-        safe = safe.replace(" ", "_")
-        safe = "".join(c for c in safe if c.isalnum() or c in ['_', '-'])
-
-        return safe
-
+    def _redact(self, value: str) -> str:
+        return value.replace(self.api_key, "[redacted]") if self.api_key else value

@@ -25,6 +25,7 @@ class ClaudeProvider:
         self.api_key = api_key
         self.model = model
         self.client = client
+        self.last_usage: dict[str, int] | None = None
         try:
             self.prompt_template = Path(prompt_template_path).read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
@@ -47,6 +48,7 @@ class ClaudeProvider:
         return self.client
 
     def generate(self, profile: Profile, item: str) -> dict[str, Any]:
+        self.last_usage = None
         prompt = f"{self.prompt_template.rstrip()}\n\nEntrada do usu\u00e1rio: {item}"
         try:
             message = self._client().messages.create(
@@ -67,6 +69,8 @@ class ClaudeProvider:
             if self.api_key:
                 message_text = message_text.replace(self.api_key, "[redacted]")
             raise ProviderError(f"Falha na API da Anthropic: {message_text}") from exc
+
+        self.last_usage = self._usage(message)
 
         if getattr(message, "stop_reason", None) == "refusal":
             raise ProviderError("A Anthropic recusou a gera\u00e7\u00e3o")
@@ -93,3 +97,26 @@ class ClaudeProvider:
             return validate_profile_content(profile, content)
         except ValueError as exc:
             raise ProviderError(f"Resposta estruturada inv\u00e1lida: {exc}") from exc
+
+    @staticmethod
+    def _usage(message: Any) -> dict[str, int] | None:
+        usage = getattr(message, "usage", None)
+        if usage is None:
+            return None
+        if isinstance(usage, dict):
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+        else:
+            input_tokens = getattr(usage, "input_tokens", None)
+            output_tokens = getattr(usage, "output_tokens", None)
+        if (
+            type(input_tokens) is not int
+            or input_tokens < 0
+            or type(output_tokens) is not int
+            or output_tokens < 0
+        ):
+            return None
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }

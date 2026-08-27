@@ -32,11 +32,15 @@ def build_note_fields(
     item_id: str,
     content: dict[str, Any],
     image_filename: str | None = None,
+    main_audio_filename: str | None = None,
 ) -> dict[str, str]:
     """Build escaped Anki fields for the two fixed profiles."""
+    if not main_audio_filename:
+        raise ValueError("O áudio principal V2 é obrigatório")
+    main_audio = f"[sound:{_html(main_audio_filename)}]"
     if profile is ENGLISH_VOCABULARY:
         if not image_filename:
-            raise ValueError("O perfil ingl\u00eas requer a imagem-fixture de QA")
+            raise ValueError("O perfil ingl\u00eas requer imagem")
         return {
             "ItemId": item_id,
             "Input": _html(raw_input),
@@ -45,7 +49,7 @@ def build_note_fields(
             "PartsOfSpeech": " / ".join(_html(part) for part in content["parts_of_speech"]),
             "SensesHtml": _english_senses(content),
             "Image": f'<img src="{_html(image_filename)}">',
-            "MainAudio": "",
+            "MainAudio": main_audio,
             "ExampleAudio": "",
         }
 
@@ -59,7 +63,7 @@ def build_note_fields(
             "Register": _html(content["register"]),
             "ExampleEs": _html(content["example_es"]),
             "ExamplePtBr": _html(content["example_pt_br"]),
-            "MainAudio": "",
+            "MainAudio": main_audio,
             "ExampleAudio": "",
         }
 

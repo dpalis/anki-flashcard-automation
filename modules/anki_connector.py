@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import base64
 import re
-from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import requests
 
@@ -13,6 +12,9 @@ from .profiles import ENGLISH_VOCABULARY, SPANISH_TRAVEL, Profile
 
 
 ITEM_ID_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+MEDIA_FILENAME_PATTERN = re.compile(
+    r"aa2_[0-9a-f]{64}_(?:image\.(?:jpg|png)|main\.mp3)\Z"
+)
 V2_PROFILES = (ENGLISH_VOCABULARY, SPANISH_TRAVEL)
 MUTATING_ACTIONS = frozenset({"createModel", "storeMediaFile", "addNote"})
 
@@ -133,44 +135,17 @@ class AnkiConnector:
                 f"O note type existente diverge do contrato local: {profile.note_type}",
             )
 
-    def prepare_qa_image(self, item_id: str, image_path: str | Path) -> tuple[str, str]:
-        """Validate the QA fixture and reject its deterministic filename if occupied.
-
-        Args:
-            item_id: Deterministic hexadecimal V2 item identifier.
-            image_path: Local PNG or JPEG fixture path.
-
-        Returns:
-            The deterministic filename and base64-encoded fixture bytes.
-
-        Raises:
-            AnkiConnectError: If the fixture is invalid or the filename is occupied.
-        """
-        if not ITEM_ID_PATTERN.fullmatch(item_id):
-            raise AnkiConnectError("retrieveMediaFile", "ItemId inv\u00e1lido")
-        path = Path(image_path)
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise AnkiConnectError(
-                "retrieveMediaFile",
-                f"N\u00e3o foi poss\u00edvel ler a fixture: {path}",
-            ) from exc
-
-        suffix = path.suffix.lower()
-        if suffix == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) > 8:
-            extension = "png"
-        elif suffix in {".jpg", ".jpeg"} and data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
-            extension = "jpg"
-        else:
-            raise AnkiConnectError(
-                "retrieveMediaFile",
-                "A fixture de QA n\u00e3o \u00e9 PNG ou JPEG v\u00e1lido",
-            )
-
-        filename = f"aa2_{item_id}_image.{extension}"
-        existing = self._invoke("retrieveMediaFile", filename=filename)
-        if existing is not False:
+    def ensure_media_absent(self, filenames: Iterable[str]) -> None:
+        """Reject every predictable V2 media collision before provider calls."""
+        names = tuple(filenames)
+        if not names or len(set(names)) != len(names):
+            raise AnkiConnectError("retrieveMediaFile", "Lista de m\u00eddia V2 inv\u00e1lida")
+        for filename in names:
+            if not MEDIA_FILENAME_PATTERN.fullmatch(filename):
+                raise AnkiConnectError("retrieveMediaFile", f"Filename V2 inv\u00e1lido: {filename}")
+            existing = self._invoke("retrieveMediaFile", filename=filename)
+            if existing is False:
+                continue
             if not isinstance(existing, str):
                 raise AnkiConnectError(
                     "retrieveMediaFile",
@@ -180,25 +155,17 @@ class AnkiConnector:
                 "retrieveMediaFile",
                 f"M\u00eddia V2 j\u00e1 existe sem note correspondente: {filename}",
             )
-        return filename, base64.b64encode(data).decode("ascii")
 
-    def store_qa_image(self, filename: str, encoded_data: str) -> str:
-        """Upload a QA image that already passed the read-only preflight.
-
-        Args:
-            filename: Deterministic V2 media filename.
-            encoded_data: Base64-encoded fixture bytes from prepare_qa_image.
-
-        Returns:
-            The filename confirmed by AnkiConnect.
-
-        Raises:
-            AnkiConnectError: If AnkiConnect does not confirm the upload.
-        """
+    def store_media_file(self, filename: str, data: bytes) -> str:
+        """Upload one validated V2 media payload after collision preflight."""
+        if not MEDIA_FILENAME_PATTERN.fullmatch(filename):
+            raise AnkiConnectError("storeMediaFile", f"Filename V2 inv\u00e1lido: {filename}")
+        if not isinstance(data, bytes) or not data:
+            raise AnkiConnectError("storeMediaFile", "Bytes de m\u00eddia V2 inv\u00e1lidos")
         stored = self._invoke(
             "storeMediaFile",
             filename=filename,
-            data=encoded_data,
+            data=base64.b64encode(data).decode("ascii"),
         )
         if stored != filename:
             raise AnkiConnectError(

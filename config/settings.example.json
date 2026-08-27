@@ -1,7 +1,6 @@
 {
   "anki_url": "http://localhost:8765",
   "legacy_index_path": "data/processadas.json",
-  "qa_image_path": "tests/fixtures/qa-image.png",
   "profiles": {
     "english_vocabulary": {
       "deck_name": "Anki Automation V2 QA",
