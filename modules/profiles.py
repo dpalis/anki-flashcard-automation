@@ -15,18 +15,28 @@ CARD_FIELDS = (
     "MainAudio",
 )
 
+CARD_CSS = (
+    ".card {\n"
+    "    font-family: arial;\n"
+    "    font-size: 20px;\n"
+    "    text-align: center;\n"
+    "    color: black;\n"
+    "    background-color: white;\n"
+    "}\n"
+)
 TARGET_HTML = '<div style="color:#0000ff;font-weight:700;">{{Target}}</div>'
 CONTENT_HTML = '<div style="margin-top:1em;">{{ContentHtml}}</div>'
 AUDIO_HTML = '<div style="margin-top:1em;">{{MainAudio}}</div>'
+ANSWER_PREFIX = "{{FrontSide}}\n\n<hr id=answer>\n\n"
 
 CARD_TEMPLATES = {
     "Target to Meaning": {
         "Front": TARGET_HTML,
-        "Back": "\n".join(("{{Image}}", CONTENT_HTML, AUDIO_HTML)),
+        "Back": ANSWER_PREFIX + "\n".join(("{{Image}}", CONTENT_HTML, AUDIO_HTML)),
     },
     "Image to Target": {
         "Front": "{{Image}}",
-        "Back": "\n".join((TARGET_HTML, CONTENT_HTML, AUDIO_HTML)),
+        "Back": ANSWER_PREFIX + "\n".join((TARGET_HTML, CONTENT_HTML, AUDIO_HTML)),
     },
 }
 
@@ -90,6 +100,7 @@ class Profile:
     note_type: str
     fields: tuple[str, ...]
     templates: Mapping[str, Mapping[str, str]]
+    css: str
     prompt_filename: str
     tags: tuple[str, ...]
     output_schema: Mapping[str, Any]
@@ -107,6 +118,7 @@ ENGLISH_VOCABULARY = Profile(
     note_type="Anki Automation V2 - English",
     fields=CARD_FIELDS,
     templates=CARD_TEMPLATES,
+    css=CARD_CSS,
     prompt_filename="prompt_template.txt",
     tags=("anki-automation-v2", "english"),
     output_schema=ENGLISH_SCHEMA,
@@ -117,6 +129,7 @@ SPANISH_TRAVEL = Profile(
     note_type="Anki Automation V2 - Spanish",
     fields=CARD_FIELDS,
     templates=CARD_TEMPLATES,
+    css=CARD_CSS,
     prompt_filename="spanish_prompt_template.txt",
     tags=("anki-automation-v2", "spanish", "latin-america"),
     output_schema=SPANISH_SCHEMA,

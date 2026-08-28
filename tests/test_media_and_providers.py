@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def english_content():
     return {
-        "term": "polish",
+        "term": "to Polish",
         "ipa": "/ˈpɒlɪʃ/",
         "parts_of_speech": ["verb"],
         "senses": [

@@ -121,7 +121,7 @@ class AnkiConnector:
                 "createModel",
                 modelName=profile.note_type,
                 inOrderFields=list(profile.fields),
-                css="",
+                css=profile.css,
                 isCloze=False,
                 cardTemplates=list(profile.card_templates),
             )
@@ -129,7 +129,17 @@ class AnkiConnector:
 
         fields = self._invoke("modelFieldNames", modelName=profile.note_type)
         templates = self._invoke("modelTemplates", modelName=profile.note_type)
-        if fields != list(profile.fields) or templates != profile.templates:
+        if (
+            fields != list(profile.fields)
+            or templates != profile.templates
+            or tuple(templates) != tuple(profile.templates)
+        ):
+            raise AnkiConnectError(
+                "model_contract",
+                f"O note type existente diverge do contrato local: {profile.note_type}",
+            )
+        styling = self._invoke("modelStyling", modelName=profile.note_type)
+        if styling != {"css": profile.css}:
             raise AnkiConnectError(
                 "model_contract",
                 f"O note type existente diverge do contrato local: {profile.note_type}",

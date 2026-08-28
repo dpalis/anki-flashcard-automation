@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def english_content(**overrides):
     value = {
-        "term": "polish",
+        "term": "Polish",
         "ipa": "/\u02c8p\u0252l\u026a\u0283/",
         "parts_of_speech": ["verb", "noun"],
         "senses": [
@@ -451,16 +451,28 @@ class ProfileAndFormattingTests(unittest.TestCase):
     def test_both_profiles_share_the_exact_two_card_contract(self):
         expected_fields = ("ItemId", "Input", "Target", "ContentHtml", "Image", "MainAudio")
         expected_templates = ("Target to Meaning", "Image to Target")
+        expected_css = (
+            ".card {\n"
+            "    font-family: arial;\n"
+            "    font-size: 20px;\n"
+            "    text-align: center;\n"
+            "    color: black;\n"
+            "    background-color: white;\n"
+            "}\n"
+        )
         for profile in (ENGLISH_VOCABULARY, SPANISH_TRAVEL):
             with self.subTest(profile=profile.profile_id):
                 self.assertEqual(expected_fields, profile.fields)
                 self.assertEqual(expected_templates, tuple(profile.templates))
+                self.assertEqual(expected_css, profile.css)
 
                 target_card = profile.templates["Target to Meaning"]
                 image_card = profile.templates["Image to Target"]
                 self.assertIn("color:#0000ff", target_card["Front"])
                 self.assertIn("font-weight:700", target_card["Front"])
                 self.assertEqual("{{Image}}", image_card["Front"])
+                self.assertTrue(target_card["Back"].startswith("{{FrontSide}}\n\n<hr id=answer>\n\n"))
+                self.assertTrue(image_card["Back"].startswith("{{FrontSide}}\n\n<hr id=answer>\n\n"))
                 self.assertIn("{{Image}}", target_card["Back"])
                 self.assertNotIn("{{Image}}", image_card["Back"])
                 self.assertIn("color:#0000ff", image_card["Back"])
@@ -468,7 +480,6 @@ class ProfileAndFormattingTests(unittest.TestCase):
                 self.assertNotIn("{{MainAudio}}", image_card["Front"])
                 self.assertTrue(target_card["Back"].rstrip().endswith("{{MainAudio}}</div>"))
                 self.assertTrue(image_card["Back"].rstrip().endswith("{{MainAudio}}</div>"))
-                self.assertNotIn("FrontSide", target_card["Back"] + image_card["Back"])
 
     def test_common_meanings_examples_and_metadata_follow_the_reference_order(self):
         content = english_content()
@@ -580,6 +591,7 @@ class AnkiConnectorTests(unittest.TestCase):
         create = session.calls[-1]["params"]
         self.assertEqual(list(ENGLISH_VOCABULARY.fields), create["inOrderFields"])
         self.assertEqual(list(ENGLISH_VOCABULARY.card_templates), create["cardTemplates"])
+        self.assertEqual(ENGLISH_VOCABULARY.css, create["css"])
 
     def test_create_model_transport_or_invalid_response_is_uncertain_and_not_retried(self):
         cases = [
@@ -608,6 +620,25 @@ class AnkiConnectorTests(unittest.TestCase):
         self.assertEqual("model_contract", raised.exception.action)
         self.assertNotIn("createModel", [c["action"] for c in session.calls])
 
+    def test_existing_model_template_order_drift_stops_without_repair(self):
+        templates = dict(reversed(tuple(ENGLISH_VOCABULARY.templates.items())))
+        session = QueueSession(
+            [
+                ok(["QA"]),
+                ok([ENGLISH_VOCABULARY.note_type]),
+                ok(list(ENGLISH_VOCABULARY.fields)),
+                ok(templates),
+            ]
+        )
+        connector = AnkiConnector(session=session)
+        with self.assertRaises(AnkiConnectError) as raised:
+            connector.ensure_ready(ENGLISH_VOCABULARY, "QA")
+        self.assertEqual("model_contract", raised.exception.action)
+        self.assertEqual(
+            ["deckNames", "modelNames", "modelFieldNames", "modelTemplates"],
+            [call["action"] for call in session.calls],
+        )
+
     def test_matching_existing_model_is_accepted_without_mutation(self):
         session = QueueSession(
             [
@@ -615,13 +646,30 @@ class AnkiConnectorTests(unittest.TestCase):
                 ok([ENGLISH_VOCABULARY.note_type]),
                 ok(list(ENGLISH_VOCABULARY.fields)),
                 ok(copy.deepcopy(ENGLISH_VOCABULARY.templates)),
+                ok({"css": ENGLISH_VOCABULARY.css}),
             ]
         )
         AnkiConnector(session=session).ensure_ready(ENGLISH_VOCABULARY, "QA")
         self.assertEqual(
-            ["deckNames", "modelNames", "modelFieldNames", "modelTemplates"],
+            ["deckNames", "modelNames", "modelFieldNames", "modelTemplates", "modelStyling"],
             [call["action"] for call in session.calls],
         )
+
+    def test_existing_model_styling_drift_stops_without_repair(self):
+        session = QueueSession(
+            [
+                ok(["QA"]),
+                ok([ENGLISH_VOCABULARY.note_type]),
+                ok(list(ENGLISH_VOCABULARY.fields)),
+                ok(copy.deepcopy(ENGLISH_VOCABULARY.templates)),
+                ok({"css": ".card { font-size: 16px; }"}),
+            ]
+        )
+        connector = AnkiConnector(session=session)
+        with self.assertRaises(AnkiConnectError) as raised:
+            connector.ensure_ready(ENGLISH_VOCABULARY, "QA")
+        self.assertEqual("model_contract", raised.exception.action)
+        self.assertNotIn("updateModelStyling", [call["action"] for call in session.calls])
 
     def test_missing_deck_stops_without_creating_it(self):
         session = QueueSession([ok(["Other Deck"])])
@@ -858,6 +906,9 @@ class AnthropicStructuredOutputTests(unittest.TestCase):
         self.assertIn("equivalentes curtos", spanish)
         self.assertIn("não repita", english)
         self.assertIn("não repita", spanish)
+        self.assertIn("sentence case", english)
+        self.assertIn("`to ` em minúsculas", english)
+        self.assertIn("não use `to`", english.casefold())
 
 
 class CliContractTests(unittest.TestCase):

@@ -1,6 +1,9 @@
 Crie conteúdo de estudo para a palavra ou expressão inglesa fornecida.
 
 - Use inglês geral contemporâneo.
+- Formate `term` como o rótulo final do card, em sentence case: a primeira palavra lexical começa com maiúscula, enquanto as demais palavras mantêm a capitalização normal da expressão. Preserve a grafia convencional de nomes próprios, marcas e siglas.
+- Quando o item for estudado principalmente como verbo ou locução verbal, use `to ` em minúsculas antes da forma-base e comece a primeira palavra lexical com maiúscula, como em `to Circle back`. Mantenha partículas e placeholders como `something`, `somebody` e `one's` em minúsculas.
+- Não use `to` apenas porque existe algum sentido verbal: se o card reunir sentidos comuns de classes diferentes, use a forma de dicionário sem o prefixo. Frases completas mantêm capitalização e pontuação naturais.
 - Inclua somente os sentidos comuns e úteis, ordenados do mais comum para o menos comum. Não acrescente sentidos raros, arcaicos, muito regionais ou técnicos apenas para alongar a resposta.
 - Para cada sentido, escreva uma definição curta em inglês, equivalentes curtos em português do Brasil e exatamente um exemplo natural em inglês. Em `meaning_pt_br`, dê somente traduções ou sinônimos concisos; não repita a definição.
 - Informe a escrita fonética em IPA e a classificação gramatical.
