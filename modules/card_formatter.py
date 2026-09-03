@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import Any
 
@@ -10,6 +11,17 @@ from .profiles import ENGLISH_VOCABULARY, SPANISH_TRAVEL, Profile
 
 def _html(value: Any) -> str:
     return escape(str(value), quote=True)
+
+
+def _english_target(content: dict[str, Any]) -> str:
+    term = content["term"].strip()
+    has_to = term.casefold().startswith("to ")
+    lexical_term = term[3:].strip() if has_to else term
+    verbal_only = all(
+        re.search(r"\bverb\b", part.casefold()) is not None
+        for part in content["parts_of_speech"]
+    )
+    return f"to {lexical_term}" if verbal_only else lexical_term
 
 
 def _content_parts(
@@ -21,7 +33,7 @@ def _content_parts(
             part.strip().capitalize() for part in content["parts_of_speech"]
         )
         return (
-            content["term"],
+            _english_target(content),
             content["ipa"],
             content["senses"],
             "definition_en",

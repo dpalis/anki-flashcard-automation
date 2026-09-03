@@ -514,6 +514,25 @@ class ProfileAndFormattingTests(unittest.TestCase):
         self.assertEqual(sorted(positions), positions)
         self.assertGreaterEqual(body.count('style="margin-top:1em;"'), 3)
 
+    def test_english_target_uses_to_only_for_exclusively_verbal_items(self):
+        cases = (
+            ("Forsake", ["verb"], "to Forsake"),
+            ("to Forsake", ["verb"], "to Forsake"),
+            ("to Clutch", ["verb", "noun"], "Clutch"),
+            ("Clutch", ["verb", "noun"], "Clutch"),
+        )
+        for term, parts, expected in cases:
+            with self.subTest(term=term, parts=parts):
+                fields = build_note_fields(
+                    ENGLISH_VOCABULARY,
+                    term,
+                    "a" * 64,
+                    english_content(term=term, parts_of_speech=parts),
+                    "aa2_" + "a" * 64 + "_image.jpg",
+                    "aa2_" + "a" * 64 + "_main.mp3",
+                )
+                self.assertEqual(expected, fields["Target"])
+
     def test_spanish_uses_the_same_body_model_with_register_as_classification(self):
         content = spanish_content(ipa="[kiˈsjeɾa peˈðiɾ la ˈkwenta]")
         fields = build_note_fields(
@@ -895,8 +914,15 @@ class AnthropicStructuredOutputTests(unittest.TestCase):
                 self.assertIn("significado mais comum", prompt)
                 self.assertIn("uma única imagem coerente", prompt)
                 self.assertIn("sem texto", prompt)
+                self.assertIn("Relógios e calendários podem aparecer", prompt)
+                self.assertIn("sem texto ou números legíveis", prompt)
+                self.assertNotIn("placas, relógios, calendários ou marcas parecidas com texto", prompt)
                 self.assertIn("Para cada um dos significados apresentados", prompt)
                 self.assertIn("horário, data ou número exato", prompt)
+                self.assertIn("uma única cena memorável", prompt)
+                self.assertIn("Não use painéis, colagem ou cena dividida", prompt)
+                self.assertIn("prefira pessoas, mãos, gestos, objetos", prompt)
+                self.assertIn("superfícies que normalmente exibem texto ou números", prompt)
         self.assertIn("mais comum e útil no dia a dia", spanish)
         self.assertIn("registro", spanish)
         self.assertIn("não crie variantes", spanish.casefold())

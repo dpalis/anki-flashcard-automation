@@ -9,6 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from urllib.parse import unquote
 
 import requests
 
@@ -314,6 +315,16 @@ class GeminiAudioProviderTests(unittest.TestCase):
 
 
 class PollinationsImageProviderTests(unittest.TestCase):
+    def setUp(self):
+        self.text_detector_patch = patch(
+            "modules.image_provider.detect_visible_text",
+            return_value=(),
+        )
+        self.text_detector = self.text_detector_patch.start()
+
+    def tearDown(self):
+        self.text_detector_patch.stop()
+
     def test_flux_get_uses_bearer_without_key_in_url_and_accepts_jpeg_or_png(self):
         session = RecordingSession(
             gets=[
@@ -326,9 +337,19 @@ class PollinationsImageProviderTests(unittest.TestCase):
         self.assertEqual((valid_jpeg(), "jpg"), provider.generate("a visual prompt"))
         self.assertEqual((valid_png(), "png"), provider.generate("another prompt"))
         self.assertEqual(2, len(session.get_calls))
-        for url, call in session.get_calls:
+        for original_prompt, (url, call) in zip(
+            ("a visual prompt", "another prompt"), session.get_calls
+        ):
             self.assertTrue(url.startswith("https://gen.pollinations.ai/image/"))
             self.assertNotIn("pollinations-secret", url)
+            sent_prompt = unquote(url.rsplit("/", 1)[-1])
+            self.assertTrue(
+                sent_prompt.startswith(
+                    "IMPORTANT: No text, no words, no letters, no numbers, no text-like symbols, "
+                    "no signs, no labels, no logos, no typography of any kind. "
+                )
+            )
+            self.assertTrue(sent_prompt.endswith(original_prompt))
             self.assertEqual("Bearer pollinations-secret", call["headers"]["Authorization"])
             self.assertEqual("image/jpeg,image/png", call["headers"]["Accept"])
             self.assertEqual({"model": "flux", "width": 1024, "height": 1024}, call["params"])
@@ -360,6 +381,31 @@ class PollinationsImageProviderTests(unittest.TestCase):
         self.assertNotIn("image-secret", str(raised.exception))
         self.assertIn("[redacted]", str(raised.exception))
         self.assertEqual(1, len(session.get_calls))
+
+    def test_visible_text_is_terminal_after_one_image_call(self):
+        session = RecordingSession(
+            gets=[HttpResponse(content=valid_jpeg(), content_type="image/jpeg")]
+        )
+        self.text_detector.return_value = ("MEETING", "23")
+        provider = PollinationsImageProvider("secret", session=session)
+
+        with self.assertRaisesRegex(ImageProviderError, "texto ou números legíveis"):
+            provider.generate("coworkers rescheduling a meeting beside an analog clock")
+
+        self.assertEqual(1, len(session.get_calls))
+        self.text_detector.assert_called_once_with(valid_jpeg(), "jpg")
+
+    def test_clock_scene_passes_when_it_has_no_detected_characters(self):
+        session = RecordingSession(
+            gets=[HttpResponse(content=valid_jpeg(), content_type="image/jpeg")]
+        )
+        provider = PollinationsImageProvider("secret", session=session)
+
+        self.assertEqual(
+            (valid_jpeg(), "jpg"),
+            provider.generate("coworkers rescheduling a meeting beside an analog clock"),
+        )
+        self.text_detector.assert_called_once_with(valid_jpeg(), "jpg")
 
 
 class TextProviderUsageTests(unittest.TestCase):
