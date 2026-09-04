@@ -19,6 +19,7 @@ from main import (
     ProcessError,
     build_parser,
     canonicalize_input,
+    identity_variants,
     item_id_for,
     process_item,
     process_request,
@@ -150,6 +151,38 @@ class CoreIdentityTests(unittest.TestCase):
             item_id_for("spanish_travel", "polish"),
         )
 
+    def test_optional_english_to_is_an_identity_alias_only_for_english(self):
+        english_variants = identity_variants("english_vocabulary", "  to   Hint ")
+        english = {
+            item_id_for("english_vocabulary", variant)
+            for variant in english_variants
+        }
+        self.assertEqual(
+            english,
+            {
+                item_id_for("english_vocabulary", variant)
+                for variant in identity_variants("english_vocabulary", "hint")
+            },
+        )
+        self.assertEqual(
+            {"to hint", "hint"},
+            set(identity_variants("english_vocabulary", "  to   Hint ")),
+        )
+        self.assertEqual(
+            ("to hint",),
+            identity_variants("spanish_travel", "  TO   Hint "),
+        )
+        self.assertNotEqual(
+            item_id_for("spanish_travel", "to Hint"),
+            item_id_for("spanish_travel", "Hint"),
+        )
+
+    def test_sentence_initial_to_is_not_treated_as_a_verb_marker(self):
+        self.assertEqual(
+            ("to the point",),
+            identity_variants("english_vocabulary", "To the point"),
+        )
+
     def test_invalid_unicode_is_rejected_as_a_request_error(self):
         with self.assertRaisesRegex(ValueError, "Unicode"):
             item_id_for("spanish_travel", "\ud800")
@@ -178,6 +211,30 @@ class SchemaTests(unittest.TestCase):
             (ENGLISH_VOCABULARY, {**english_content(), "extra": "no"}),
             (ENGLISH_VOCABULARY, english_content(senses=[])),
             (ENGLISH_VOCABULARY, english_content(term="   ")),
+            (
+                ENGLISH_VOCABULARY,
+                english_content(
+                    senses=[
+                        {
+                            "definition_en": "A definition.",
+                            "meaning_pt_br": "Uma tradução.",
+                        }
+                    ]
+                ),
+            ),
+            (
+                ENGLISH_VOCABULARY,
+                english_content(
+                    senses=[
+                        {
+                            "definition_en": "A definition.",
+                            "meaning_pt_br": "Uma tradução.",
+                            "example_en": "One example.",
+                            "second_example_en": "Another example.",
+                        }
+                    ]
+                ),
+            ),
             (SPANISH_TRAVEL, spanish_content(register="regional")),
             (SPANISH_TRAVEL, spanish_content(senses=[])),
             (SPANISH_TRAVEL, spanish_content(senses=["not an object"])),
@@ -283,6 +340,153 @@ class ProcessItemTests(unittest.TestCase):
                 for call in anki.calls
             )
         )
+
+    def test_legacy_match_treats_optional_english_to_as_an_alias_both_ways(self):
+        cases = (("to Deem", "Deem"), ("Deem", "to Deem"))
+        for legacy_key, requested in cases:
+            with self.subTest(legacy_key=legacy_key, requested=requested):
+                legacy = self.write_legacy(json.dumps({legacy_key: {}}))
+                provider = FakeProvider(english_content())
+                anki = FakeAnki()
+                result = self.call(
+                    requested,
+                    "english_vocabulary",
+                    provider,
+                    anki,
+                    legacy,
+                )
+                self.assertEqual("skipped_legacy", result["reason"])
+                self.assertEqual([], provider.calls)
+                self.assertFalse(
+                    any(call[0] in {"ensure_ready", "store_media", "addNote"} for call in anki.calls)
+                )
+
+    def test_old_v2_hash_under_english_to_alias_is_detected(self):
+        old_item_id = "677d234d7e585f750848c58a91b6f25ec92a89cd559758f8a8c3e69019353cbb"
+
+        class IdentityAwareAnki(FakeAnki):
+            def find_exact_items(self, item_id):
+                self.calls.append(("find", item_id))
+                return ["to Hint"] if item_id == old_item_id else []
+
+        provider = FakeProvider(english_content())
+        result = self.call(
+            "Hint",
+            "english_vocabulary",
+            provider,
+            IdentityAwareAnki(),
+            self.write_legacy("{}"),
+        )
+        self.assertEqual("skipped_v2", result["reason"])
+        self.assertEqual(old_item_id, result["item_id"])
+        self.assertEqual([], provider.calls)
+
+    def test_old_v2_bare_hash_is_detected_from_english_to_alias(self):
+        old_item_id = "c57b05d93df431e811222b7cf7ed2c5e5652cebaf59d5cb74c04e954f117babb"
+
+        class IdentityAwareAnki(FakeAnki):
+            def find_exact_items(self, item_id):
+                self.calls.append(("find", item_id))
+                return ["Hint"] if item_id == old_item_id else []
+
+        provider = FakeProvider(english_content())
+        result = self.call(
+            "to Hint",
+            "english_vocabulary",
+            provider,
+            IdentityAwareAnki(),
+            self.write_legacy("{}"),
+        )
+        self.assertEqual("skipped_v2", result["reason"])
+        self.assertEqual(old_item_id, result["item_id"])
+        self.assertEqual([], provider.calls)
+
+    def test_natural_to_phrase_is_not_a_v2_alias_for_bare_phrase(self):
+        literal_phrase_id = item_id_for("english_vocabulary", "To the point")
+
+        class IdentityAwareAnki(FakeAnki):
+            def find_exact_items(self, item_id):
+                self.calls.append(("find", item_id))
+                return ["To the point"] if item_id == literal_phrase_id else []
+
+        provider = FakeProvider(english_content())
+        result = self.call(
+            "the point",
+            "english_vocabulary",
+            provider,
+            IdentityAwareAnki(),
+            self.write_legacy("{}"),
+        )
+        self.assertEqual("created", result["kind"])
+        self.assertEqual(1, len(provider.calls))
+
+    def test_natural_to_phrase_and_marker_hash_collision_stops_safely(self):
+        cases = (
+            ("To be honest", "to Be honest"),
+            ("to Be honest", "To be honest"),
+        )
+        for requested, existing in cases:
+            with self.subTest(requested=requested, existing=existing):
+                shared_item_id = item_id_for("english_vocabulary", requested)
+
+                class IdentityAwareAnki(FakeAnki):
+                    def find_exact_items(self, item_id):
+                        self.calls.append(("find", item_id))
+                        return [existing] if item_id == shared_item_id else []
+
+                provider = FakeProvider(english_content())
+                anki = IdentityAwareAnki()
+                with self.assertRaises(ProcessError) as raised:
+                    self.call(
+                        requested,
+                        "english_vocabulary",
+                        provider,
+                        anki,
+                        self.write_legacy("{}"),
+                    )
+                self.assertEqual("identity", raised.exception.stage)
+                self.assertEqual([], provider.calls)
+                self.assertFalse(
+                    any(call[0] in {"ensure_ready", "store_media", "addNote"} for call in anki.calls)
+                )
+
+    def test_natural_to_phrase_and_bare_phrase_do_not_cross_match_legacy(self):
+        cases = (("To be honest", "Be honest"), ("Be honest", "To be honest"))
+        for legacy_key, requested in cases:
+            with self.subTest(legacy_key=legacy_key, requested=requested):
+                provider = FakeProvider(english_content())
+                result = self.call(
+                    requested,
+                    "english_vocabulary",
+                    provider,
+                    FakeAnki(),
+                    self.write_legacy(json.dumps({legacy_key: {}})),
+                )
+                self.assertEqual("created", result["kind"])
+                self.assertEqual(1, len(provider.calls))
+
+    def test_existing_notes_under_both_english_to_aliases_stop_as_a_conflict(self):
+        candidate_ids = {
+            item_id_for("english_vocabulary", variant)
+            for variant in identity_variants("english_vocabulary", "Hint")
+        }
+
+        class ConflictedAnki(FakeAnki):
+            def find_exact_items(self, item_id):
+                self.calls.append(("find", item_id))
+                return ["Hint"] if item_id in candidate_ids else []
+
+        provider = FakeProvider(english_content())
+        with self.assertRaises(ProcessError) as raised:
+            self.call(
+                "Hint",
+                "english_vocabulary",
+                provider,
+                ConflictedAnki(),
+                self.write_legacy("{}"),
+            )
+        self.assertEqual("identity", raised.exception.stage)
+        self.assertEqual([], provider.calls)
 
     def test_one_exact_v2_match_skips_and_reports_existing_input(self):
         provider = FakeProvider(spanish_content())
@@ -923,6 +1127,12 @@ class AnthropicStructuredOutputTests(unittest.TestCase):
                 self.assertIn("Não use painéis, colagem ou cena dividida", prompt)
                 self.assertIn("prefira pessoas, mãos, gestos, objetos", prompt)
                 self.assertIn("superfícies que normalmente exibem texto ou números", prompt)
+                self.assertIn("um único sentido por padrão", prompt)
+                self.assertIn("materialmente diferente", prompt)
+                self.assertIn("ficarem quase iguais", prompt)
+                self.assertIn("neutras, atuais e respeitosas", prompt)
+                self.assertIn("rótulos ofensivos", prompt)
+                self.assertIn("exatamente um exemplo", prompt)
         self.assertIn("mais comum e útil no dia a dia", spanish)
         self.assertIn("registro", spanish)
         self.assertIn("não crie variantes", spanish.casefold())

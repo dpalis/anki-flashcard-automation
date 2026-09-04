@@ -37,24 +37,66 @@ class ProcessError(Exception):
         self.outcome_uncertain = outcome_uncertain
 
 
-def canonicalize_input(value: str) -> str:
+def _normalize_input(value: str) -> str:
     if not isinstance(value, str):
         raise ValueError("A entrada deve ser texto")
     normalized = unicodedata.normalize("NFC", value)
-    canonical = " ".join(normalized.split()).casefold()
+    collapsed = " ".join(normalized.split())
     try:
-        canonical.encode("utf-8")
+        collapsed.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ValueError("A entrada cont\u00e9m Unicode inv\u00e1lido") from exc
-    return canonical
+    return collapsed
+
+
+def canonicalize_input(value: str) -> str:
+    return _normalize_input(value).casefold()
+
+
+def _english_inputs_share_identity(first: str, second: str) -> bool:
+    first_normalized = _normalize_input(first)
+    second_normalized = _normalize_input(second)
+    first_canonical = first_normalized.casefold()
+    second_canonical = second_normalized.casefold()
+    first_marker = first_normalized.startswith("to ")
+    second_marker = second_normalized.startswith("to ")
+
+    if first_canonical == second_canonical:
+        if first_canonical.startswith("to "):
+            return first_marker == second_marker
+        return True
+    if first_marker and not second_canonical.startswith("to "):
+        return first_canonical[3:] == second_canonical
+    if second_marker and not first_canonical.startswith("to "):
+        return second_canonical[3:] == first_canonical
+    return False
+
+
+def identity_variants(profile_id: str, value: str) -> tuple[str, ...]:
+    """Return the spellings that identify the same requested study item."""
+    normalized = _normalize_input(value)
+    canonical = normalized.casefold()
+    if not canonical:
+        raise ValueError("A entrada n\u00e3o pode ser vazia")
+    variants = [canonical]
+    if profile_id == ENGLISH_VOCABULARY.profile_id:
+        if normalized.startswith("to "):
+            lexical = canonical[3:].strip()
+            if lexical:
+                variants.append(lexical)
+        elif not canonical.startswith("to "):
+            variants.append(f"to {canonical}")
+    return tuple(dict.fromkeys(variants))
+
+
+def _item_id_for_canonical(profile_id: str, canonical: str) -> str:
+    payload = profile_id.encode("utf-8") + b"\0" + canonical.encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def item_id_for(profile_id: str, value: str) -> str:
-    canonical = canonicalize_input(value)
-    if not canonical:
-        raise ValueError("A entrada n\u00e3o pode ser vazia")
-    payload = profile_id.encode("utf-8") + b"\0" + canonical.encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    canonical = identity_variants(profile_id, value)[0]
+    return _item_id_for_canonical(profile_id, canonical)
 
 
 def estimate_storage(profile_id: str, item_count: int) -> dict[str, int]:
@@ -82,7 +124,7 @@ def load_legacy_blocklist(path: str | Path | None) -> set[str]:
     if not isinstance(data, dict) or not all(isinstance(key, str) for key in data):
         raise ProcessError("legacy", "processadas.json n\u00e3o \u00e9 um objeto JSON com chaves textuais")
     try:
-        blocklist = {canonicalize_input(key) for key in data}
+        blocklist = {_normalize_input(key) for key in data}
     except ValueError as exc:
         raise ProcessError("legacy", "processadas.json cont\u00e9m uma chave inv\u00e1lida") from exc
     if "" in blocklist:
@@ -124,26 +166,51 @@ def process_item(
     """Process one item. All preflight completes before the provider is called."""
     try:
         profile = get_profile(profile_id)
-        item_id = item_id_for(profile_id, item)
+        canonical_variants = identity_variants(profile_id, item)
+        candidate_ids = tuple(
+            _item_id_for_canonical(profile_id, canonical)
+            for canonical in canonical_variants
+        )
+        item_id = candidate_ids[0]
     except ValueError as exc:
         raise ProcessError("request", str(exc)) from exc
 
-    exact = _anki_call("identity", anki.find_exact_items, item_id)
+    exact: list[tuple[str, str]] = []
+    incompatible_primary = False
+    for index, candidate_id in enumerate(candidate_ids):
+        for existing_input in _anki_call("identity", anki.find_exact_items, candidate_id):
+            existing_input = unescape(existing_input)
+            if profile is ENGLISH_VOCABULARY and not _english_inputs_share_identity(
+                item,
+                existing_input,
+            ):
+                incompatible_primary = incompatible_primary or index == 0
+                continue
+            exact.append((candidate_id, existing_input))
+    if incompatible_primary:
+        raise ProcessError(
+            "identity",
+            "O ItemId já pertence a uma entrada inglesa incompatível; verifique no Anki",
+        )
     if len(exact) == 1:
+        existing_item_id, existing_input = exact[0]
         return {
             "kind": "skipped",
-            "item_id": item_id,
+            "item_id": existing_item_id,
             "reason": "skipped_v2",
-            "existing_input": unescape(exact[0]),
+            "existing_input": existing_input,
         }
     if len(exact) > 1:
         raise ProcessError(
             "identity",
-            f"Foram encontradas {len(exact)} notes com o mesmo ItemId; verifique no Anki",
+            f"Foram encontradas {len(exact)} notes com a mesma identidade; verifique no Anki",
         )
 
     if profile is ENGLISH_VOCABULARY:
-        if canonicalize_input(item) in load_legacy_blocklist(legacy_path):
+        if any(
+            _english_inputs_share_identity(item, legacy_item)
+            for legacy_item in load_legacy_blocklist(legacy_path)
+        ):
             return {
                 "kind": "skipped",
                 "item_id": item_id,
