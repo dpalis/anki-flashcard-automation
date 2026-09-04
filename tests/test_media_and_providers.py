@@ -720,27 +720,39 @@ class EstimateAndConfirmationTests(unittest.TestCase):
             estimate_storage("spanish_travel", 2),
         )
 
-    def test_unconfirmed_json_batch_returns_before_settings_or_provider_construction(self):
-        stdout = io.StringIO()
-        request = json.dumps({"profile": "spanish_travel", "items": ["one", "two"]})
-        with (
-            patch.object(main_module, "ClaudeProvider") as text_constructor,
-            patch.object(main_module, "GeminiAudioProvider") as audio_constructor,
-            patch.object(main_module, "PollinationsImageProvider") as image_constructor,
-            patch.object(main_module, "_load_settings") as settings_loader,
-            patch.object(main_module.sys, "stdin", io.StringIO(request)),
-            redirect_stdout(stdout),
-        ):
-            exit_code = main_module.main(["--json", "--settings", "/missing/settings.json"])
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(0, exit_code)
-        self.assertEqual("needs_confirmation", payload["status"])
-        self.assertEqual({"status", "estimate", "created", "skipped", "error"}, set(payload))
-        self.assertEqual(2, payload["estimate"]["items"])
-        settings_loader.assert_not_called()
-        text_constructor.assert_not_called()
-        audio_constructor.assert_not_called()
-        image_constructor.assert_not_called()
+    def test_unconfirmed_json_request_returns_before_settings_or_provider_construction(self):
+        requests = (
+            {"profile": "spanish_travel", "items": ["one"]},
+            {"profile": "spanish_travel", "items": ["one"], "confirmed": False},
+            {"profile": "spanish_travel", "items": ["one", "two"], "confirmed": False},
+        )
+        for request_data in requests:
+            items = request_data["items"]
+            with self.subTest(item_count=len(items), confirmed=request_data.get("confirmed")):
+                stdout = io.StringIO()
+                request = json.dumps(request_data)
+                with (
+                    patch.object(main_module, "ClaudeProvider") as text_constructor,
+                    patch.object(main_module, "GeminiAudioProvider") as audio_constructor,
+                    patch.object(main_module, "PollinationsImageProvider") as image_constructor,
+                    patch.object(main_module, "_load_settings") as settings_loader,
+                    patch.object(main_module.sys, "stdin", io.StringIO(request)),
+                    redirect_stdout(stdout),
+                ):
+                    exit_code = main_module.main(
+                        ["--json", "--settings", "/missing/settings.json"]
+                    )
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(0, exit_code)
+                self.assertEqual("needs_confirmation", payload["status"])
+                self.assertEqual(
+                    {"status", "estimate", "created", "skipped", "error"}, set(payload)
+                )
+                self.assertEqual(len(items), payload["estimate"]["items"])
+                settings_loader.assert_not_called()
+                text_constructor.assert_not_called()
+                audio_constructor.assert_not_called()
+                image_constructor.assert_not_called()
 
     def test_confirmed_json_batch_constructs_image_provider_for_spanish(self):
         with tempfile.TemporaryDirectory() as tmp:

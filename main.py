@@ -482,7 +482,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 if not items:
                     result = _error_result("request", "O pedido deve conter ao menos um item")
-                elif len(items) > 1 and not confirmed:
+                elif not confirmed:
                     result = _confirmation_result(profile_id, items)
                 else:
                     result = _run_configured(profile_id, items, args.settings)

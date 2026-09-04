@@ -1003,7 +1003,9 @@ class CliContractTests(unittest.TestCase):
             for profile_id, item, content in cases:
                 with self.subTest(profile=profile_id):
                     stdout = io.StringIO()
-                    request = json.dumps({"profile": profile_id, "items": [item]})
+                    request = json.dumps(
+                        {"profile": profile_id, "items": [item], "confirmed": True}
+                    )
                     with (
                         patch.dict(
                             main_module.os.environ,
@@ -1053,7 +1055,11 @@ class CliContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             request = json.dumps(
-                {"profile": "spanish_travel", "items": ["\ud800"]},
+                {
+                    "profile": "spanish_travel",
+                    "items": ["\ud800"],
+                    "confirmed": True,
+                },
                 ensure_ascii=True,
             )
             stdout = io.StringIO()
