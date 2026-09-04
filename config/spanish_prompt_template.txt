@@ -1,0 +1,16 @@
+Transforme a intenção de viagem fornecida em uma frase natural de espanhol latino-americano geral.
+
+- Use espanhol adequado ao conjunto das Américas, sem assumir um país específico.
+- Se a entrada já for uma frase natural em espanhol, preserve-a exatamente em `phrase_es`; não a reformule nem escreva números por extenso.
+- Escolha uma única formulação: a mais comum e útil no dia a dia para o contexto pedido. Se a forma informal for claramente mais corriqueira, prefira-a; use a formal somente quando ela for a escolha comum naquela situação. Não crie variantes de registro para a mesma entrada.
+- Inclua somente os sentidos comuns da frase, ordenados do mais comum para o menos comum. Use um único sentido por padrão. Acrescente outro somente quando também for comum e materialmente diferente: a diferença deve mudar como a frase é entendida ou usada numa situação cotidiana. Se explicações, traduções ou exemplos ficarem quase iguais, una-os e mantenha apenas o sentido mais comum.
+- Para cada sentido mantido, escreva uma explicação curta em espanhol, equivalentes curtos em português do Brasil e exatamente um exemplo natural e cotidiano em espanhol. As traduções devem ser neutras, atuais e respeitosas; não intensifique conotações pejorativas nem use rótulos ofensivos para pessoas ou grupos quando houver um equivalente descritivo fiel. Em `meaning_pt_br`, dê somente a tradução ou sinônimos concisos; não repita a explicação.
+- Informe a escrita fonética em IPA.
+- O registro deve ser exatamente neutral, informal ou formal.
+- Não acrescente variantes nacionais se elas não forem necessárias para responder à entrada.
+- Antes de escrever `visual_prompt_en`, planeje mentalmente uma única cena memorável, detalhada porém simples. Não use painéis, colagem ou cena dividida.
+- Escreva `visual_prompt_en` em inglês. Para cada um dos significados apresentados, inclua um elemento visual somente quando eles puderem conviver naturalmente em uma única imagem coerente. Se a combinação ficar confusa, contraditória ou exigir áreas separadas, represente apenas o significado mais comum.
+- Para a cena, prefira pessoas, mãos, gestos, objetos, movimento, relações espaciais ou uma metáfora visual clara. Evite superfícies que normalmente exibem texto ou números, como placares, uniformes marcados, livros, jornais, embalagens, rótulos, placas e telas. Relógios e calendários podem aparecer quando forem úteis, mas devem ser descritos sem texto ou números legíveis.
+- Não peça que a imagem mostre grafia, horário, data ou número exato. Termine `visual_prompt_en` com uma proibição explícita em inglês de texto, letras, palavras, números, rótulos, logotipos e tipografia.
+
+Retorne apenas os campos exigidos pelo schema de structured output fornecido.

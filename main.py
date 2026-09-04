@@ -1,391 +1,576 @@
 #!/usr/bin/env python3
-"""
-Script principal para automação de criação de flashcards no Anki.
+"""Local, sequential entry point for Anki Automation V2."""
 
-Uso:
-    python main.py                    # Processa palavras.txt
-    python main.py --word "nimble"    # Processa uma palavra específica
-    python main.py --reset-cache      # Limpa cache e reprocessa tudo
-"""
+from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
+import unicodedata
+from html import unescape
 from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Iterable
 
-from modules.llm_provider import ClaudeProvider
+from modules.anki_connector import AnkiConnectError, AnkiConnector
+from modules.audio_provider import AudioProviderError, GeminiAudioProvider
+from modules.card_formatter import build_note_fields
 from modules.image_provider import PollinationsImageProvider
-from modules.anki_connector import AnkiConnector
-from modules.card_formatter import CardFormatter
+from modules.llm_provider import ClaudeProvider, ProviderError
+from modules.profiles import ENGLISH_VOCABULARY, get_profile, validate_profile_content
 
 
-# Caminhos dos arquivos
-BASE_DIR = Path(__file__).parent
-CONFIG_DIR = BASE_DIR / "config"
-DATA_DIR = BASE_DIR / "data"
-SETTINGS_FILE = CONFIG_DIR / "settings.json"
-PROMPT_TEMPLATE_FILE = CONFIG_DIR / "prompt_template.txt"
-WORDS_FILE = DATA_DIR / "palavras.txt"
-CACHE_FILE = DATA_DIR / "processadas.json"
-IMAGES_DIR = DATA_DIR / "images"
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_SETTINGS_FILE = BASE_DIR / "config" / "settings.json"
+STORAGE_BYTES_PER_ITEM = {
+    "english_vocabulary": (88 * 1024, 364 * 1024),
+    "spanish_travel": (88 * 1024, 364 * 1024),
+}
+POLLINATIONS_IMAGE_ESTIMATED_COST_USD = 0.002
 
 
-def load_settings() -> Dict:
-    """
-    Carrega as configurações do arquivo settings.json.
+class ProcessError(Exception):
+    def __init__(self, stage: str, message: str, outcome_uncertain: bool = False) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.outcome_uncertain = outcome_uncertain
 
-    Returns:
-        Dicionário com as configurações
 
-    Raises:
-        Exception: Se o arquivo não existir ou for inválido
-    """
-    if not SETTINGS_FILE.exists():
-        raise Exception(f"Arquivo de configurações não encontrado: {SETTINGS_FILE}")
+def _normalize_input(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("A entrada deve ser texto")
+    normalized = unicodedata.normalize("NFC", value)
+    collapsed = " ".join(normalized.split())
+    try:
+        collapsed.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("A entrada cont\u00e9m Unicode inv\u00e1lido") from exc
+    return collapsed
 
-    with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-        settings = json.load(f)
 
-    # Valida API key
-    if not settings.get('anthropic_api_key'):
-        raise Exception(
-            "API key da Anthropic não configurada. "
-            f"Por favor, configure 'anthropic_api_key' em {SETTINGS_FILE}"
+def canonicalize_input(value: str) -> str:
+    return _normalize_input(value).casefold()
+
+
+def _english_inputs_share_identity(first: str, second: str) -> bool:
+    first_normalized = _normalize_input(first)
+    second_normalized = _normalize_input(second)
+    first_canonical = first_normalized.casefold()
+    second_canonical = second_normalized.casefold()
+    first_marker = first_normalized.startswith("to ")
+    second_marker = second_normalized.startswith("to ")
+
+    if first_canonical == second_canonical:
+        if first_canonical.startswith("to "):
+            return first_marker == second_marker
+        return True
+    if first_marker and not second_canonical.startswith("to "):
+        return first_canonical[3:] == second_canonical
+    if second_marker and not first_canonical.startswith("to "):
+        return second_canonical[3:] == first_canonical
+    return False
+
+
+def identity_variants(profile_id: str, value: str) -> tuple[str, ...]:
+    """Return the spellings that identify the same requested study item."""
+    normalized = _normalize_input(value)
+    canonical = normalized.casefold()
+    if not canonical:
+        raise ValueError("A entrada n\u00e3o pode ser vazia")
+    variants = [canonical]
+    if profile_id == ENGLISH_VOCABULARY.profile_id:
+        if normalized.startswith("to "):
+            lexical = canonical[3:].strip()
+            if lexical:
+                variants.append(lexical)
+        elif not canonical.startswith("to "):
+            variants.append(f"to {canonical}")
+    return tuple(dict.fromkeys(variants))
+
+
+def _item_id_for_canonical(profile_id: str, canonical: str) -> str:
+    payload = profile_id.encode("utf-8") + b"\0" + canonical.encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def item_id_for(profile_id: str, value: str) -> str:
+    canonical = identity_variants(profile_id, value)[0]
+    return _item_id_for_canonical(profile_id, canonical)
+
+
+def estimate_storage(profile_id: str, item_count: int) -> dict[str, int]:
+    """Return the plan's simple media storage range for a requested batch."""
+    get_profile(profile_id)
+    if type(item_count) is not int or item_count < 0:
+        raise ValueError("A quantidade de itens deve ser um inteiro não negativo")
+    minimum, maximum = STORAGE_BYTES_PER_ITEM[profile_id]
+    return {
+        "items": item_count,
+        "min_bytes": item_count * minimum,
+        "max_bytes": item_count * maximum,
+    }
+
+
+def load_legacy_blocklist(path: str | Path | None) -> set[str]:
+    if path is None:
+        raise ProcessError("legacy", "O caminho de processadas.json n\u00e3o foi configurado")
+    legacy_path = Path(path)
+    try:
+        with legacy_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ProcessError("legacy", f"N\u00e3o foi poss\u00edvel ler o \u00edndice legado: {legacy_path}") from exc
+    if not isinstance(data, dict) or not all(isinstance(key, str) for key in data):
+        raise ProcessError("legacy", "processadas.json n\u00e3o \u00e9 um objeto JSON com chaves textuais")
+    try:
+        blocklist = {_normalize_input(key) for key in data}
+    except ValueError as exc:
+        raise ProcessError("legacy", "processadas.json cont\u00e9m uma chave inv\u00e1lida") from exc
+    if "" in blocklist:
+        raise ProcessError("legacy", "processadas.json cont\u00e9m uma chave vazia")
+    return blocklist
+
+
+def _anki_call(stage: str, function: Any, *args: Any) -> Any:
+    try:
+        return function(*args)
+    except AnkiConnectError as exc:
+        raise ProcessError(
+            stage,
+            f"{exc.action}: {exc}",
+            outcome_uncertain=exc.outcome_uncertain,
+        ) from exc
+
+
+def _redact_secrets(message: str) -> str:
+    redacted = message
+    for name in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "POLLINATIONS_API_KEY"):
+        secret = os.environ.get(name)
+        if secret:
+            redacted = redacted.replace(secret, "[redacted]")
+    return redacted
+
+
+def process_item(
+    item: str,
+    profile_id: str,
+    *,
+    provider: Any,
+    image_provider: Any | None,
+    audio_provider: Any,
+    anki: Any,
+    deck_name: str,
+    legacy_path: str | Path | None,
+) -> dict[str, Any]:
+    """Process one item. All preflight completes before the provider is called."""
+    try:
+        profile = get_profile(profile_id)
+        canonical_variants = identity_variants(profile_id, item)
+        candidate_ids = tuple(
+            _item_id_for_canonical(profile_id, canonical)
+            for canonical in canonical_variants
+        )
+        item_id = candidate_ids[0]
+    except ValueError as exc:
+        raise ProcessError("request", str(exc)) from exc
+
+    exact: list[tuple[str, str]] = []
+    incompatible_primary = False
+    for index, candidate_id in enumerate(candidate_ids):
+        for existing_input in _anki_call("identity", anki.find_exact_items, candidate_id):
+            existing_input = unescape(existing_input)
+            if profile is ENGLISH_VOCABULARY and not _english_inputs_share_identity(
+                item,
+                existing_input,
+            ):
+                incompatible_primary = incompatible_primary or index == 0
+                continue
+            exact.append((candidate_id, existing_input))
+    if incompatible_primary:
+        raise ProcessError(
+            "identity",
+            "O ItemId já pertence a uma entrada inglesa incompatível; verifique no Anki",
+        )
+    if len(exact) == 1:
+        existing_item_id, existing_input = exact[0]
+        return {
+            "kind": "skipped",
+            "item_id": existing_item_id,
+            "reason": "skipped_v2",
+            "existing_input": existing_input,
+        }
+    if len(exact) > 1:
+        raise ProcessError(
+            "identity",
+            f"Foram encontradas {len(exact)} notes com a mesma identidade; verifique no Anki",
         )
 
+    if profile is ENGLISH_VOCABULARY:
+        if any(
+            _english_inputs_share_identity(item, legacy_item)
+            for legacy_item in load_legacy_blocklist(legacy_path)
+        ):
+            return {
+                "kind": "skipped",
+                "item_id": item_id,
+                "reason": "skipped_legacy",
+            }
+
+    _anki_call("preflight", anki.ensure_ready, profile, deck_name)
+    image_jpg = f"aa2_{item_id}_image.jpg"
+    image_png = f"aa2_{item_id}_image.png"
+    audio_filename = f"aa2_{item_id}_main.mp3"
+    media_candidates = [image_jpg, image_png, audio_filename]
+    if image_provider is None:
+        raise ProcessError("settings", "O provider de imagem não foi configurado")
+    if audio_provider is None:
+        raise ProcessError("settings", "O provider de áudio não foi configurado")
+    _anki_call("media", anki.ensure_media_absent, media_candidates)
+
+    try:
+        generated = provider.generate(profile, item)
+    except Exception as exc:
+        raise ProcessError("provider", _redact_secrets(str(exc))) from exc
+
+    try:
+        content = validate_profile_content(profile, generated)
+    except ValueError as exc:
+        raise ProcessError("validation", str(exc)) from exc
+
+    metrics: dict[str, Any] = {}
+    text_usage = getattr(provider, "last_usage", None)
+    if isinstance(text_usage, dict):
+        metrics["anthropic"] = dict(text_usage)
+
+    prepared_media: list[tuple[str, bytes]] = []
+    try:
+        image_bytes, image_extension = image_provider.generate(content["visual_prompt_en"])
+    except Exception as exc:
+        raise ProcessError("image_provider", _redact_secrets(str(exc))) from exc
+    if image_extension not in {"jpg", "png"} or not isinstance(image_bytes, bytes):
+        raise ProcessError("image_provider", "A Pollinations devolveu mídia inválida")
+    image_filename = f"aa2_{item_id}_image.{image_extension}"
+    prepared_media.append((image_filename, image_bytes))
+    metrics["pollinations"] = {
+        "image_bytes": len(image_bytes),
+        "estimated_cost_usd": POLLINATIONS_IMAGE_ESTIMATED_COST_USD,
+    }
+
+    audio_text = content["term"] if profile is ENGLISH_VOCABULARY else content["phrase_es"]
+    audio_locale = "en-US" if profile is ENGLISH_VOCABULARY else "es-US"
+    try:
+        audio_bytes, audio_metrics = audio_provider.generate(audio_text, audio_locale)
+    except Exception as exc:
+        raise ProcessError("audio_provider", _redact_secrets(str(exc))) from exc
+    if not isinstance(audio_bytes, bytes) or not isinstance(audio_metrics, dict):
+        raise ProcessError("audio_provider", "O Gemini devolveu mídia ou métricas inválidas")
+    prepared_media.append((audio_filename, audio_bytes))
+    metrics["gemini"] = dict(audio_metrics)
+
+    uploaded_filenames = []
+    for filename, data in prepared_media:
+        try:
+            stored = _anki_call("media", anki.store_media_file, filename, data)
+        except ProcessError as exc:
+            context = f"{exc}; ItemId={item_id}; mídia atual={filename}"
+            if uploaded_filenames:
+                context += f"; mídias enviadas={','.join(uploaded_filenames)}"
+            raise ProcessError(exc.stage, context, exc.outcome_uncertain) from exc
+        uploaded_filenames.append(stored)
+
+    try:
+        fields = build_note_fields(
+            profile,
+            item,
+            item_id,
+            content,
+            image_filename,
+            audio_filename,
+        )
+    except ValueError as exc:
+        raise ProcessError("validation", str(exc)) from exc
+    try:
+        note_id = _anki_call("anki", anki.add_note, profile, deck_name, fields)
+    except ProcessError as exc:
+        context = f"{exc}; ItemId={item_id}"
+        if uploaded_filenames:
+            context += f"; mídias enviadas={','.join(uploaded_filenames)}"
+        raise ProcessError(exc.stage, context, exc.outcome_uncertain) from exc
+    return {
+        "kind": "created",
+        "item_id": item_id,
+        "note_id": note_id,
+        "metrics": metrics,
+    }
+
+
+def _empty_result(estimate: dict[str, int] | None = None) -> dict[str, Any]:
+    return {"status": "ok", "estimate": estimate, "created": [], "skipped": [], "error": None}
+
+
+def process_request(
+    profile_id: str,
+    items: Iterable[str],
+    *,
+    provider: Any,
+    image_provider: Any | None,
+    audio_provider: Any,
+    anki: Any,
+    deck_name: str,
+    legacy_path: str | Path | None,
+) -> dict[str, Any]:
+    requested_items = list(items)
+    if not requested_items:
+        return _error_result("request", "O pedido deve conter ao menos um item")
+    result = _empty_result(estimate_storage(profile_id, len(requested_items)))
+
+    for item in requested_items:
+        try:
+            item_result = process_item(
+                item,
+                profile_id,
+                provider=provider,
+                image_provider=image_provider,
+                audio_provider=audio_provider,
+                anki=anki,
+                deck_name=deck_name,
+                legacy_path=legacy_path,
+            )
+        except ProcessError as exc:
+            result["status"] = "error"
+            result["error"] = {
+                "item": item,
+                "stage": exc.stage,
+                "message": _redact_secrets(str(exc)),
+                "outcome_uncertain": exc.outcome_uncertain,
+            }
+            break
+
+        if item_result["kind"] == "created":
+            created = {
+                "item_id": item_result["item_id"],
+                "note_id": item_result["note_id"],
+            }
+            if item_result.get("metrics"):
+                created["metrics"] = item_result["metrics"]
+            result["created"].append(created)
+        else:
+            skipped = {
+                "item_id": item_result["item_id"],
+                "reason": item_result["reason"],
+            }
+            if "existing_input" in item_result:
+                skipped["existing_input"] = item_result["existing_input"]
+            result["skipped"].append(skipped)
+    return result
+
+
+def read_items_file(path: str | Path) -> list[str]:
+    try:
+        with Path(path).open("r", encoding="utf-8") as handle:
+            return [line.strip() for line in handle if line.strip()]
+    except (OSError, UnicodeError) as exc:
+        raise ProcessError("request", f"N\u00e3o foi poss\u00edvel ler o arquivo de entrada: {path}") from exc
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Cria notes V2 de ingl\u00eas ou espanhol no Anki")
+    parser.add_argument("--json", action="store_true", help="L\u00ea um pedido JSON de stdin")
+    parser.add_argument("--profile", choices=("english_vocabulary", "spanish_travel"))
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--item", help="Processa um item")
+    source.add_argument("--file", type=Path, help="Processa um item por linha, sem alterar o arquivo")
+    parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_FILE)
+    return parser
+
+
+def _error_result(stage: str, message: str, item: str | None = None) -> dict[str, Any]:
+    result = _empty_result()
+    result["status"] = "error"
+    result["error"] = {
+        "item": item,
+        "stage": stage,
+        "message": _redact_secrets(message),
+        "outcome_uncertain": False,
+    }
+    return result
+
+
+def _confirmation_result(profile_id: str, items: list[str]) -> dict[str, Any]:
+    result = _empty_result(estimate_storage(profile_id, len(items)))
+    result["status"] = "needs_confirmation"
+    return result
+
+
+def _read_json_request() -> tuple[str, list[str], bool]:
+    try:
+        request = json.load(sys.stdin)
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ProcessError("request", f"JSON de entrada inv\u00e1lido: {exc}") from exc
+    if not isinstance(request, dict) or not set(request).issubset({"profile", "items", "confirmed"}):
+        raise ProcessError("request", "O pedido JSON possui campos inv\u00e1lidos")
+    profile_id = request.get("profile")
+    items = request.get("items")
+    confirmed = request.get("confirmed", False)
+    if (
+        not isinstance(profile_id, str)
+        or not isinstance(items, list)
+        or not all(isinstance(item, str) for item in items)
+    ):
+        raise ProcessError("request", "O pedido JSON requer profile e uma lista textual items")
+    if not isinstance(confirmed, bool):
+        raise ProcessError("request", "confirmed deve ser booleano")
+    return profile_id, items, confirmed
+
+
+def _load_settings(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            settings = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ProcessError("settings", f"N\u00e3o foi poss\u00edvel ler as configura\u00e7\u00f5es: {path}") from exc
+    if not isinstance(settings, dict):
+        raise ProcessError("settings", "O arquivo de configura\u00e7\u00f5es deve ser um objeto JSON")
     return settings
 
 
-def load_cache() -> Dict:
-    """
-    Carrega o cache de palavras processadas.
+def _resolve_setting_path(settings_path: Path, value: Any, label: str) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise ProcessError("settings", f"Configura\u00e7\u00e3o ausente: {label}")
+    path = Path(value)
+    return path if path.is_absolute() else (settings_path.parent.parent / path).resolve()
 
-    Returns:
-        Dicionário com palavras processadas
-    """
-    if not CACHE_FILE.exists():
-        return {}
+
+def _run_configured(profile_id: str, items: list[str], settings_path: Path) -> dict[str, Any]:
+    try:
+        profile = get_profile(profile_id)
+    except ValueError as exc:
+        return _error_result("request", str(exc))
+    for item in items:
+        try:
+            item_id_for(profile_id, item)
+        except ValueError as exc:
+            return _error_result("request", str(exc), item=item)
 
     try:
-        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {}
+        settings = _load_settings(settings_path)
+        configured_profiles = settings.get("profiles")
+        if not isinstance(configured_profiles, dict):
+            raise ProcessError("settings", "Configura\u00e7\u00e3o ausente ou inv\u00e1lida: profiles")
+        profile_settings = configured_profiles.get(profile_id)
+        if not isinstance(profile_settings, dict):
+            raise ProcessError("settings", f"Configura\u00e7\u00e3o ausente para {profile_id}")
+        deck_name = profile_settings.get("deck_name")
+        model = profile_settings.get("anthropic_model")
+        if not isinstance(deck_name, str) or not deck_name.strip():
+            raise ProcessError("settings", f"deck_name ausente para {profile_id}")
+        if not isinstance(model, str) or not model.strip():
+            raise ProcessError("settings", f"anthropic_model ausente para {profile_id}")
+        anki_url = settings.get("anki_url", "http://localhost:8765")
+        if not isinstance(anki_url, str) or not anki_url.strip():
+            raise ProcessError("settings", "anki_url inv\u00e1lida")
 
-
-def save_cache(cache: Dict) -> None:
-    """
-    Salva o cache de palavras processadas.
-
-    Args:
-        cache: Dicionário com palavras processadas
-    """
-    # Garante que o diretório existe
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(cache, f, indent=2, ensure_ascii=False)
-
-
-def is_processed(word: str, cache: Dict) -> bool:
-    """
-    Verifica se uma palavra já foi processada.
-
-    Args:
-        word: Palavra a verificar
-        cache: Cache de palavras processadas
-
-    Returns:
-        True se já foi processada
-    """
-    return word.lower() in cache
-
-
-def process_word(
-    word: str,
-    llm_provider: ClaudeProvider,
-    image_provider: PollinationsImageProvider,
-    anki_connector: AnkiConnector,
-    deck_name: str,
-    tags: List[str],
-    cache: Dict
-) -> bool:
-    """
-    Processa uma palavra: gera conteúdo, imagem e cria cards no Anki.
-
-    Args:
-        word: Palavra a processar
-        llm_provider: Provider do LLM
-        image_provider: Provider de imagens
-        anki_connector: Conector do Anki
-        deck_name: Nome do deck
-        tags: Tags para os cards
-        cache: Cache de palavras processadas
-
-    Returns:
-        True se processado com sucesso
-    """
-    print(f"\n{'='*60}")
-    print(f"📝 Processando: {word}")
-    print(f"{'='*60}")
-
-    try:
-        # 1. Gera conteúdo usando Claude API
-        print("🤖 Gerando conteúdo com Claude API...")
-        flashcard_data = llm_provider.generate_flashcard_content(word)
-
-        if not llm_provider.validate_response(flashcard_data):
-            print("  ✗ Resposta inválida do LLM")
-            return False
-
-        print("  ✓ Conteúdo gerado com sucesso")
-
-        # 2. Gera imagem
-        print("🎨 Gerando imagem conceitual...")
-        image_path = image_provider.generate_image(
-            word,
-            flashcard_data['visual_concept']
-        )
-
-        if not image_path:
-            print("  ✗ Falha ao gerar imagem")
-            return False
-
-        # 3. Adiciona imagem ao Anki
-        print("📤 Enviando imagem para o Anki...")
-        image_filename = os.path.basename(image_path)
-        if not anki_connector.add_media_file(image_path, image_filename):
-            print("  ✗ Falha ao adicionar imagem ao Anki")
-            return False
-
-        print("  ✓ Imagem adicionada ao Anki")
-
-        # 4. Cria os 2 cards no Anki
-        print("🃏 Criando flashcards no Anki...")
-        card_ids = anki_connector.create_flashcards(
-            word,
-            flashcard_data['content'],
-            image_filename,
-            deck_name,
-            tags
-        )
-
-        if len(card_ids) != 2:
-            print("  ⚠ Nem todos os cards foram criados")
-            return False
-
-        # 5. Atualiza o cache
-        cache[word.lower()] = {
-            "timestamp": datetime.now().isoformat(),
-            "card_ids": card_ids
-        }
-        save_cache(cache)
-
-        print(f"\n✅ Palavra '{word}' processada com sucesso!")
-        return True
-
-    except Exception as e:
-        print(f"\n❌ Erro ao processar '{word}': {str(e)}")
-        return False
-
-
-def load_words_from_file() -> List[str]:
-    """
-    Carrega a lista de palavras do arquivo palavras.txt.
-
-    Returns:
-        Lista de palavras
-
-    Raises:
-        Exception: Se o arquivo não existir
-    """
-    if not WORDS_FILE.exists():
-        raise Exception(f"Arquivo de palavras não encontrado: {WORDS_FILE}")
-
-    with open(WORDS_FILE, 'r', encoding='utf-8') as f:
-        words = [line.strip() for line in f if line.strip()]
-
-    return words
-
-
-def remove_word_from_file(word: str) -> None:
-    """
-    Remove uma palavra do arquivo palavras.txt após processamento bem-sucedido.
-
-    Args:
-        word: Palavra a ser removida
-    """
-    try:
-        # Lê todas as palavras atuais
-        if not WORDS_FILE.exists():
-            return
-
-        with open(WORDS_FILE, 'r', encoding='utf-8') as f:
-            words = [line.strip() for line in f if line.strip()]
-
-        # Remove a palavra processada (case-insensitive)
-        words_updated = [w for w in words if w.lower() != word.lower()]
-
-        # Reescreve o arquivo com as palavras restantes
-        with open(WORDS_FILE, 'w', encoding='utf-8') as f:
-            for w in words_updated:
-                f.write(f"{w}\n")
-
-        print(f"  ✓ Palavra '{word}' removida de {WORDS_FILE.name}")
-
-    except Exception as e:
-        print(f"  ⚠ Erro ao remover palavra do arquivo: {str(e)}")
-        # Não falhamos o processo se isso der erro - apenas avisa
-
-
-def main():
-    """
-    Função principal do script.
-    """
-    # Parser de argumentos
-    parser = argparse.ArgumentParser(
-        description="Automatiza a criação de flashcards no Anki com vocabulário em inglês"
-    )
-    parser.add_argument(
-        '--word',
-        type=str,
-        help='Processa uma palavra específica'
-    )
-    parser.add_argument(
-        '--reset-cache',
-        action='store_true',
-        help='Limpa o cache e reprocessa todas as palavras'
-    )
-
-    args = parser.parse_args()
-
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║          ANKI AUTOMATION - Gerador de Flashcards        ║")
-    print("╚══════════════════════════════════════════════════════════╝")
-
-    try:
-        # 1. Carrega configurações
-        print("\n📋 Carregando configurações...")
-        settings = load_settings()
-        if not settings.get('pollinations_api_key'):
-            print("  ⚠ pollinations_api_key não configurada — imagens podem falhar")
-        print("  ✓ Configurações carregadas")
-
-        # 2. Verifica conexão com Anki
-        print("\n🔗 Verificando conexão com AnkiConnect...")
-        anki_connector = AnkiConnector(
-            settings['anki_url'],
-            settings.get('card_model', 'Básico')
-        )
-
-        if not anki_connector.check_connection():
-            raise Exception(
-                "Não foi possível conectar ao AnkiConnect. "
-                "Certifique-se de que o Anki está aberto com o plugin AnkiConnect instalado."
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        pollinations_key = os.environ.get("POLLINATIONS_API_KEY")
+        missing_keys = []
+        if not anthropic_key:
+            missing_keys.append("ANTHROPIC_API_KEY")
+        if not gemini_key:
+            missing_keys.append("GEMINI_API_KEY")
+        if not pollinations_key:
+            missing_keys.append("POLLINATIONS_API_KEY")
+        if missing_keys:
+            raise ProcessError(
+                "settings",
+                f"Credencial de ambiente ausente: {', '.join(missing_keys)}",
             )
 
-        print("  ✓ Conectado ao Anki")
-
-        # 3. Cria deck se necessário
-        deck_name = settings['deck_name']
-        print(f"\n📚 Verificando deck '{deck_name}'...")
-        anki_connector.create_deck_if_needed(deck_name)
-
-        # 4. Inicializa providers
-        print("\n⚙️  Inicializando providers...")
-        llm_provider = ClaudeProvider(
-            settings['anthropic_api_key'],
-            str(PROMPT_TEMPLATE_FILE),
-            settings.get('llm_model', 'claude-sonnet-4-6')
-        )
-
-        image_provider = PollinationsImageProvider(
-            str(IMAGES_DIR),
-            settings['max_retries_image'],
-            settings['image_quality'],
-            settings.get('pollinations_api_key', '')
-        )
-
-        print("  ✓ Providers inicializados")
-
-        # 5. Carrega ou reseta cache
-        if args.reset_cache:
-            print("\n🗑️  Resetando cache...")
-            cache = {}
-            save_cache(cache)
+        if profile is ENGLISH_VOCABULARY:
+            legacy_path = _resolve_setting_path(
+                settings_path, settings.get("legacy_index_path"), "legacy_index_path"
+            )
         else:
-            cache = load_cache()
-            if cache:
-                print(f"\n📦 Cache carregado: {len(cache)} palavra(s) já processada(s)")
-
-        # 6. Define palavras a processar
-        if args.word:
-            # Processa palavra específica
-            words = [args.word]
+            legacy_path = None
+        image_provider = PollinationsImageProvider(pollinations_key)
+        prompt_path = settings_path.parent / profile.prompt_filename
+        provider = ClaudeProvider(anthropic_key, prompt_path, model)
+        audio_provider = GeminiAudioProvider(gemini_key)
+        anki = AnkiConnector(anki_url)
+    except (ProcessError, ProviderError, AudioProviderError) as exc:
+        if isinstance(exc, ProcessError):
+            stage = exc.stage
+        elif isinstance(exc, AudioProviderError):
+            stage = "audio_provider"
         else:
-            # Processa arquivo
-            words = load_words_from_file()
+            stage = "provider"
+        return _error_result(stage, str(exc))
 
-        print(f"\n📝 Total de palavras a processar: {len(words)}")
+    return process_request(
+        profile_id,
+        items,
+        provider=provider,
+        image_provider=image_provider,
+        audio_provider=audio_provider,
+        anki=anki,
+        deck_name=deck_name,
+        legacy_path=legacy_path,
+    )
 
-        # 7. Processa cada palavra
-        success_count = 0
-        skip_count = 0
-        fail_count = 0
 
-        for i, word in enumerate(words, 1):
-            # Verifica se já foi processada
-            if is_processed(word, cache) and not args.reset_cache:
-                print(f"\n[{i}/{len(words)}] ⏭️  '{word}' já foi processada (pulando)")
-                skip_count += 1
-                continue
+def _confirm_cli(profile_id: str, items: list[str]) -> bool:
+    estimate = estimate_storage(profile_id, len(items))
+    print(
+        "Estimativa de mídia: "
+        f"{estimate['min_bytes']}-{estimate['max_bytes']} bytes para {len(items)} itens.",
+        file=sys.stderr,
+    )
+    print("Continuar? [s/N] ", end="", file=sys.stderr, flush=True)
+    answer = sys.stdin.readline().strip().casefold()
+    return answer in {"s", "sim", "y", "yes"}
 
-            # Processa a palavra
-            print(f"\n[{i}/{len(words)}]")
-            if process_word(
-                word,
-                llm_provider,
-                image_provider,
-                anki_connector,
-                deck_name,
-                settings['default_tags'],
-                cache
-            ):
-                success_count += 1
 
-                # Remove do arquivo palavras.txt se foi processada do arquivo (não --word)
-                if not args.word:
-                    remove_word_from_file(word)
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.json:
+        if args.profile or args.item or args.file:
+            result = _error_result("request", "--json n\u00e3o pode ser combinado com --profile, --item ou --file")
+        else:
+            try:
+                profile_id, items, confirmed = _read_json_request()
+                estimate_storage(profile_id, len(items))
+            except ProcessError as exc:
+                result = _error_result(exc.stage, str(exc))
+            except ValueError as exc:
+                result = _error_result("request", str(exc))
             else:
-                fail_count += 1
+                if not items:
+                    result = _error_result("request", "O pedido deve conter ao menos um item")
+                elif not confirmed:
+                    result = _confirmation_result(profile_id, items)
+                else:
+                    result = _run_configured(profile_id, items, args.settings)
+        print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
+        return 0 if result["status"] != "error" else 1
 
-        # 8. Resume final
-        print("\n" + "="*60)
-        print("📊 RESUMO FINAL")
-        print("="*60)
-        print(f"✅ Processadas com sucesso: {success_count}")
-        print(f"⏭️  Puladas (já existentes): {skip_count}")
-        print(f"❌ Falharam: {fail_count}")
-        print(f"📝 Total: {len(words)}")
-        print("="*60)
-
-        if fail_count > 0:
-            print("\n⚠️  Algumas palavras falharam. Revise os erros acima.")
-            sys.exit(1)
+    if not args.profile or (args.item is None and args.file is None):
+        parser.error("--profile e exatamente um de --item/--file s\u00e3o obrigat\u00f3rios")
+    try:
+        items = [args.item] if args.item is not None else read_items_file(args.file)
+        if not items:
+            result = _error_result("request", "O pedido deve conter ao menos um item")
+        elif len(items) > 1 and not _confirm_cli(args.profile, items):
+            result = _confirmation_result(args.profile, items)
         else:
-            print("\n🎉 Processamento concluído com sucesso!")
-            sys.exit(0)
-
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Processamento interrompido pelo usuário")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ ERRO FATAL: {str(e)}")
-        sys.exit(1)
+            result = _run_configured(args.profile, items, args.settings)
+    except ProcessError as exc:
+        result = _error_result(exc.stage, str(exc))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["status"] != "error" else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
