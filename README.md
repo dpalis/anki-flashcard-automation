@@ -1,5 +1,33 @@
 # Anki Automation - Gerador Automático de Flashcards
 
+> **Estado atual da V2:** a entrada `./run.sh --json` aceita os perfis explícitos
+> `english_vocabulary`, `spanish_travel` e `japanese_travel`. Cada perfil aponta
+> para um deck já existente; a aplicação não cria decks. As instruções detalhadas
+> abaixo descrevem a V1 e permanecem apenas como referência histórica.
+
+## Entrada JSON da V2
+
+`./run.sh --json` recebe pela entrada padrão exatamente `profile` (texto),
+`items` (lista de textos) e `confirmed` (booleano opcional, padrão `false`):
+
+```json
+{"profile":"japanese_travel","items":["Onde fica a estação?"],"confirmed":false}
+```
+
+Com `confirmed:false`, nenhuma note é criada: a resposta tem status
+`needs_confirmation` e a estimativa de armazenamento. Para executar, reenvie o
+mesmo pedido trocando apenas o valor para `"confirmed":true`.
+
+Os status são `needs_confirmation` (aguarda aprovação), `ok` (itens criados ou
+ignorados por duplicidade) e `error` (parou no primeiro erro, sem retry ou
+rollback automático). Deck e modelo Anthropic de cada perfil ficam em
+[`config/settings.example.json`](config/settings.example.json).
+
+No perfil japonês, frase e exemplos aparecem em romaji (alfabeto latino), com
+explicações e traduções em português. A transcrição fonética em IPA aparece abaixo
+da classificação e antes do áudio, como no inglês. A escrita japonesa fica somente
+na geração de áudio, sem aparecer nos cards. Os demais perfis mantêm seu formato.
+
 Sistema modular em Python para automatizar a criação de flashcards no Anki, com vocabulário em inglês, definições geradas por LLM (Claude API) e imagens conceituais.
 
 ## 📋 Pré-requisitos

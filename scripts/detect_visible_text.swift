@@ -21,6 +21,8 @@ else {
 
 let request = VNRecognizeTextRequest()
 request.recognitionLevel = .accurate
+request.recognitionLanguages = ["en-US", "es-ES", "ja-JP"]
+request.automaticallyDetectsLanguage = true
 request.usesLanguageCorrection = false
 request.minimumTextHeight = 0.01
 
@@ -32,7 +34,9 @@ do {
 
 let alphanumerics = CharacterSet.alphanumerics
 for observation in request.results ?? [] {
-    guard let candidate = observation.topCandidates(1).first, candidate.confidence >= 0.70 else {
+    // Presença de texto importa, não a precisão da transcrição: letreiros
+    // japoneses visíveis no QA receberam confiança de apenas 0.3.
+    guard let candidate = observation.topCandidates(1).first, candidate.confidence >= 0.30 else {
         continue
     }
     let value = candidate.string.trimmingCharacters(in: .whitespacesAndNewlines)

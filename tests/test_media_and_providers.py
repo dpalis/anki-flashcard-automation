@@ -17,7 +17,12 @@ import main as main_module
 from main import ProcessError, estimate_storage, item_id_for, process_item
 from modules.anki_connector import AnkiConnectError
 from modules.audio_provider import AudioProviderError, GeminiAudioProvider
-from modules.image_provider import ImageProviderError, PollinationsImageProvider
+from modules.image_provider import (
+    ImageProviderError,
+    PollinationsImageProvider,
+    detect_visible_text,
+)
+from modules.profiles import JAPANESE_TRAVEL, profile_ids
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +80,51 @@ def valid_jpeg() -> bytes:
 
 def valid_png() -> bytes:
     return b"\x89PNG\r\n\x1a\n" + b"image" * 150
+
+
+def japanese_text_png() -> bytes:
+    """Return a small high-contrast PNG containing the text 東京駅."""
+    encoded = (
+        "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"
+        "vQY9X/aaBhkAAAAASUVORK5CYII="
+    )
+    return base64.b64decode(encoded)
 
 
 def interaction(audio: bytes, *, mime_type: str = "audio/l16", blocks: int = 1):
@@ -151,11 +201,17 @@ def ffmpeg_fake(paths, *, failure=False):
 
 
 class GeminiAudioProviderTests(unittest.TestCase):
-    def test_iapetus_payload_for_both_locales_is_single_shot_and_returns_metrics(self):
+    def test_iapetus_payload_uses_each_language_instruction_without_retry(self):
+        cases = (
+            ("en-US", "Use natural contemporary American English."),
+            ("es-US", "Use neutral Latin American Spanish."),
+            (JAPANESE_TRAVEL.audio_locale, JAPANESE_TRAVEL.audio_instruction),
+        )
         session = RecordingSession(
             posts=[
                 HttpResponse(payload=interaction(b"\x00\x01" * 800)),
                 HttpResponse(payload=interaction(valid_wav(), mime_type="audio/wav")),
+                HttpResponse(payload=interaction(b"\x00\x01" * 800)),
             ]
         )
         temporary_paths = []
@@ -165,17 +221,17 @@ class GeminiAudioProviderTests(unittest.TestCase):
             run_command=ffmpeg_fake(temporary_paths),
         )
 
-        for locale in ("en-US", "es-US"):
+        for locale, instruction in cases:
             with self.subTest(locale=locale):
-                mp3, metrics = provider.generate("Study phrase", locale)
+                mp3, metrics = provider.generate("Study phrase", locale, instruction)
                 self.assertTrue(mp3.startswith(b"ID3"))
                 self.assertEqual(11, metrics["input_tokens"])
                 self.assertEqual(29, metrics["audio_tokens"])
                 self.assertEqual(len(mp3), metrics["mp3_bytes"])
                 self.assertGreater(metrics["estimated_cost_usd"], 0)
 
-        self.assertEqual(2, len(session.post_calls))
-        for locale, (url, call) in zip(("en-US", "es-US"), session.post_calls):
+        self.assertEqual(3, len(session.post_calls))
+        for (locale, instruction), (url, call) in zip(cases, session.post_calls):
             self.assertEqual(
                 "https://generativelanguage.googleapis.com/v1beta/interactions",
                 url,
@@ -191,8 +247,19 @@ class GeminiAudioProviderTests(unittest.TestCase):
                 [{"voice": "Iapetus", "language": locale}],
                 payload["generation_config"]["speech_config"],
             )
+            self.assertIn(instruction, payload["input"])
+            self.assertTrue(payload["input"].endswith("TRANSCRIPT:\nStudy phrase"))
         self.assertTrue(temporary_paths)
         self.assertTrue(all(not path.exists() for path in temporary_paths))
+
+    def test_invalid_locale_or_instruction_stops_before_paid_call(self):
+        session = RecordingSession()
+        provider = GeminiAudioProvider("secret", session=session)
+        for locale, instruction in (("japanese", "Read naturally."), ("ja-JP", " ")):
+            with self.subTest(locale=locale, instruction=instruction):
+                with self.assertRaises(AudioProviderError):
+                    provider.generate("こんにちは", locale, instruction)
+        self.assertEqual([], session.post_calls)
 
     def test_invalid_audio_shapes_fail_after_one_call(self):
         cases = (
@@ -325,6 +392,22 @@ class PollinationsImageProviderTests(unittest.TestCase):
     def tearDown(self):
         self.text_detector_patch.stop()
 
+    def test_native_ocr_output_keeps_japanese_characters_and_numbers(self):
+        completed = SimpleNamespace(stdout="駅\n!@\n23\n")
+        with patch("modules.image_provider.subprocess.run", return_value=completed):
+            self.assertEqual(("駅", "23"), detect_visible_text(valid_jpeg(), "jpg"))
+
+    def test_native_vision_helper_detects_japanese_text(self):
+        self.assertTrue(detect_visible_text(japanese_text_png(), "png"))
+
+    def test_native_vision_blocks_low_confidence_japanese_signs(self):
+        image = (ROOT / "tests/fixtures/japanese-station-signs.jpg").read_bytes()
+        self.assertTrue(detect_visible_text(image, "jpg"))
+
+    def test_native_vision_accepts_image_without_text(self):
+        image = (ROOT / "tests/fixtures/qa-image.png").read_bytes()
+        self.assertEqual((), detect_visible_text(image, "png"))
+
     def test_flux_get_uses_bearer_without_key_in_url_and_accepts_jpeg_or_png(self):
         session = RecordingSession(
             gets=[
@@ -389,11 +472,27 @@ class PollinationsImageProviderTests(unittest.TestCase):
         self.text_detector.return_value = ("MEETING", "23")
         provider = PollinationsImageProvider("secret", session=session)
 
-        with self.assertRaisesRegex(ImageProviderError, "texto ou números legíveis"):
+        with self.assertRaisesRegex(ImageProviderError, "possível texto ou números"):
             provider.generate("coworkers rescheduling a meeting beside an analog clock")
 
         self.assertEqual(1, len(session.get_calls))
         self.text_detector.assert_called_once_with(valid_jpeg(), "jpg")
+
+    def test_possible_ocr_false_positive_still_blocks_without_claiming_certainty(self):
+        session = RecordingSession(
+            gets=[HttpResponse(content=valid_jpeg(), content_type="image/jpeg")]
+        )
+        self.text_detector.return_value = ("00",)
+        provider = PollinationsImageProvider("secret", session=session)
+
+        with self.assertRaises(ImageProviderError) as raised:
+            provider.generate("a train with headlights")
+
+        message = str(raised.exception)
+        self.assertIn("possível texto ou números (00)", message)
+        self.assertIn("falso positivo", message)
+        self.assertIn("nenhum áudio ou card foi criado", message)
+        self.assertEqual(1, len(session.get_calls))
 
     def test_clock_scene_passes_when_it_has_no_detected_characters(self):
         session = RecordingSession(
@@ -456,8 +555,8 @@ class FakeAudioProvider:
         self.calls = []
         self.events = events
 
-    def generate(self, text, locale):
-        self.calls.append((text, locale))
+    def generate(self, text, locale, instruction):
+        self.calls.append((text, locale, instruction))
         if self.events is not None:
             self.events.append("audio")
         return valid_mp3(), {
@@ -564,7 +663,13 @@ class MediaFlowTests(unittest.TestCase):
         )
         self.assertEqual([spanish_content()["visual_prompt_en"]], image.calls)
         self.assertEqual(
-            [("Quisiera pedir la cuenta, por favor.", "es-US")],
+            [
+                (
+                    "Quisiera pedir la cuenta, por favor.",
+                    "es-US",
+                    main_module.get_profile("spanish_travel").audio_instruction,
+                )
+            ],
             audio.calls,
         )
         stored = [call[1] for call in anki.calls if call[0] == "store"]
@@ -596,8 +701,8 @@ class MediaFlowTests(unittest.TestCase):
 
     def test_audio_failure_stops_before_anki_mutation_for_both_profiles(self):
         class FailedAudioProvider(FakeAudioProvider):
-            def generate(self, text, locale):
-                self.calls.append((text, locale))
+            def generate(self, text, locale, instruction):
+                self.calls.append((text, locale, instruction))
                 raise AudioProviderError("audio failed")
 
         cases = (
@@ -710,21 +815,22 @@ class MediaFlowTests(unittest.TestCase):
 
 
 class EstimateAndConfirmationTests(unittest.TestCase):
-    def test_both_profiles_estimate_image_and_audio_storage(self):
-        self.assertEqual(
-            {"items": 2, "min_bytes": 2 * 88 * 1024, "max_bytes": 2 * 364 * 1024},
-            estimate_storage("english_vocabulary", 2),
-        )
-        self.assertEqual(
-            {"items": 2, "min_bytes": 2 * 88 * 1024, "max_bytes": 2 * 364 * 1024},
-            estimate_storage("spanish_travel", 2),
-        )
+    def test_registered_profiles_estimate_the_same_image_and_audio_storage(self):
+        expected = {
+            "items": 2,
+            "min_bytes": 2 * 88 * 1024,
+            "max_bytes": 2 * 364 * 1024,
+        }
+        for profile_id in profile_ids():
+            with self.subTest(profile=profile_id):
+                self.assertEqual(expected, estimate_storage(profile_id, 2))
 
     def test_unconfirmed_json_request_returns_before_settings_or_provider_construction(self):
         requests = (
             {"profile": "spanish_travel", "items": ["one"]},
             {"profile": "spanish_travel", "items": ["one"], "confirmed": False},
             {"profile": "spanish_travel", "items": ["one", "two"], "confirmed": False},
+            {"profile": "japanese_travel", "items": ["駅はどこですか"], "confirmed": False},
         )
         for request_data in requests:
             items = request_data["items"]

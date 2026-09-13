@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,7 +19,7 @@ GEMINI_AUDIO_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/intera
 GEMINI_AUDIO_MODEL = "gemini-3.1-flash-tts-preview"
 GEMINI_AUDIO_VOICE = "Iapetus"
 GEMINI_API_REVISION = "2026-05-20"
-SUPPORTED_LOCALES = frozenset({"en-US", "es-US"})
+LOCALE_PATTERN = re.compile(r"[a-z]{2,3}-[A-Z]{2}\Z")
 MIN_MP3_BYTES = 512
 
 
@@ -46,17 +47,26 @@ class GeminiAudioProvider:
         if shutil.which(self.ffmpeg_path) is None:
             raise AudioProviderError("ffmpeg não está disponível para converter o áudio")
 
-    def generate(self, text: str, locale: str) -> tuple[bytes, dict[str, Any]]:
+    def generate(
+        self,
+        text: str,
+        locale: str,
+        instruction: str | None = None,
+    ) -> tuple[bytes, dict[str, Any]]:
         """Generate one 24 kHz mono 96 kb/s MP3 and return its usage metrics."""
         if not self.api_key:
             raise AudioProviderError("GEMINI_API_KEY não está configurada")
-        if locale not in SUPPORTED_LOCALES:
-            raise AudioProviderError(f"Locale de áudio não suportado: {locale}")
+        if not isinstance(locale, str) or LOCALE_PATTERN.fullmatch(locale) is None:
+            raise AudioProviderError(f"Locale de áudio inválido: {locale}")
         if not isinstance(text, str) or not text.strip():
             raise AudioProviderError("O texto do áudio não pode ser vazio")
+        if instruction is None:
+            instruction = "Use clear, natural pronunciation at a comfortable study pace."
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise AudioProviderError("A instrução de pronúncia não pode ser vazia")
         payload = {
             "model": GEMINI_AUDIO_MODEL,
-            "input": self._prompt(text, locale),
+            "input": self._prompt(text, instruction),
             "response_format": {"type": "audio"},
             "generation_config": {
                 "speech_config": [
@@ -93,20 +103,11 @@ class GeminiAudioProvider:
         return mp3_bytes, metrics
 
     @staticmethod
-    def _prompt(text: str, locale: str) -> str:
-        if locale == "en-US":
-            instruction = (
-                "Read only the transcript below, exactly once, without an introduction "
-                "or extra words. Use clear, natural contemporary American English at a "
-                "comfortable study pace."
-            )
-        else:
-            instruction = (
-                "Read only the transcript below, exactly once, without an introduction "
-                "or extra words. Use neutral Latin American Spanish as spoken across the "
-                "Americas, without a country-specific accent, at a comfortable study pace."
-            )
-        return f"{instruction}\n\nTRANSCRIPT:\n{text}"
+    def _prompt(text: str, instruction: str) -> str:
+        return (
+            "Read only the transcript below, exactly once, without an introduction or "
+            f"extra words. {instruction}\n\nTRANSCRIPT:\n{text}"
+        )
 
     @staticmethod
     def _single_audio_block(envelope: Any) -> dict[str, Any]:

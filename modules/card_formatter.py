@@ -1,4 +1,4 @@
-"""Render the shared V2 card layout for English and Spanish."""
+"""Render the shared V2 card layout for every registered language profile."""
 
 from __future__ import annotations
 
@@ -6,61 +6,57 @@ import re
 from html import escape
 from typing import Any
 
-from .profiles import ENGLISH_VOCABULARY, SPANISH_TRAVEL, Profile
+from .profiles import Profile
 
 
 def _html(value: Any) -> str:
     return escape(str(value), quote=True)
 
 
-def _english_target(content: dict[str, Any]) -> str:
-    term = content["term"].strip()
-    has_to = term.casefold().startswith("to ")
-    lexical_term = term[3:].strip() if has_to else term
+def _target(profile: Profile, content: dict[str, Any]) -> str:
+    target = content[profile.romanization_field or profile.target_field].strip()
+    marker = profile.identity_alias_prefix
+    if marker is None:
+        return target
+    has_marker = target.casefold().startswith(marker)
+    lexical_target = target[len(marker):].strip() if has_marker else target
     verbal_only = all(
         re.search(r"\bverb\b", part.casefold()) is not None
-        for part in content["parts_of_speech"]
+        for part in content[profile.classification_field]
     )
-    return f"to {lexical_term}" if verbal_only else lexical_term
+    return f"{marker}{lexical_target}" if verbal_only else lexical_target
 
 
 def _content_parts(
     profile: Profile,
     content: dict[str, Any],
 ) -> tuple[str, str, list[dict[str, Any]], str, str, str]:
-    if profile is ENGLISH_VOCABULARY:
+    classification_value = content[profile.classification_field]
+    if profile.classification_multiple:
         classification = " / ".join(
-            part.strip().capitalize() for part in content["parts_of_speech"]
+            value.strip().capitalize() for value in classification_value
         )
-        return (
-            _english_target(content),
-            content["ipa"],
-            content["senses"],
-            "definition_en",
-            "example_en",
-            classification,
-        )
-    if profile is SPANISH_TRAVEL:
-        return (
-            content["phrase_es"],
-            content["ipa"],
-            content["senses"],
-            "definition_es",
-            "example_es",
-            content["register"].strip().capitalize(),
-        )
-    raise ValueError(f"Perfil desconhecido: {profile.profile_id}")
+    else:
+        classification = classification_value.strip().capitalize()
+    return (
+        _target(profile, content),
+        content[profile.pronunciation_field],
+        content["senses"],
+        profile.definition_field,
+        profile.example_field,
+        classification,
+    )
 
 
 def _render_content(profile: Profile, content: dict[str, Any]) -> tuple[str, str]:
     target, ipa, senses, definition_field, example_field, classification = _content_parts(
         profile, content
     )
-    ipa = ipa.strip()
-    if ipa.startswith("[") and ipa.endswith("]"):
-        ipa = ipa[1:-1].strip()
-    if not (ipa.startswith("/") and ipa.endswith("/")):
-        ipa = f"/{ipa.strip('/')}/"
+    pronunciation = ipa.strip()
+    if pronunciation.startswith("[") and pronunciation.endswith("]"):
+        pronunciation = pronunciation[1:-1].strip()
+    if not (pronunciation.startswith("/") and pronunciation.endswith("/")):
+        pronunciation = f"/{pronunciation.strip('/')}/"
 
     meanings = []
     for index, sense in enumerate(senses):
@@ -74,7 +70,7 @@ def _render_content(profile: Profile, content: dict[str, Any]) -> tuple[str, str
     metadata = (
         f"<div>{translations}</div>"
         f"<div>{_html(classification)}</div>"
-        f"<div>{_html(ipa)}</div>"
+        f"<div>{_html(pronunciation)}</div>"
     )
     body = (
         "".join(meanings)
