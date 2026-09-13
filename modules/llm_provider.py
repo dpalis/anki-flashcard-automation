@@ -1,4 +1,4 @@
-"""Direct Anthropic Structured Outputs integration for the two V2 profiles."""
+"""Direct Anthropic Structured Outputs integration for V2 language profiles."""
 
 from __future__ import annotations
 

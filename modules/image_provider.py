@@ -122,8 +122,9 @@ class PollinationsImageProvider:
         if findings:
             summary = "; ".join(findings[:3])
             raise ImageProviderError(
-                f"A imagem gerada contém texto ou números legíveis ({summary}); "
-                "nenhum áudio ou card foi criado"
+                f"O OCR identificou possível texto ou números ({summary}); "
+                "a imagem foi bloqueada e nenhum áudio ou card foi criado. "
+                "A detecção pode ser um falso positivo; não houve nova tentativa automática"
             )
         return data, extension
 

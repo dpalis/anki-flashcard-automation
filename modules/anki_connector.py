@@ -8,14 +8,13 @@ from typing import Any, Iterable
 
 import requests
 
-from .profiles import ENGLISH_VOCABULARY, SPANISH_TRAVEL, Profile
+from .profiles import Profile, is_registered_profile
 
 
 ITEM_ID_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 MEDIA_FILENAME_PATTERN = re.compile(
     r"aa2_[0-9a-f]{64}_(?:image\.(?:jpg|png)|main\.mp3)\Z"
 )
-V2_PROFILES = (ENGLISH_VOCABULARY, SPANISH_TRAVEL)
 MUTATING_ACTIONS = frozenset({"createModel", "storeMediaFile", "addNote"})
 
 
@@ -35,7 +34,8 @@ class AnkiConnector:
         timeout: float = 10,
     ) -> None:
         self.anki_url = anki_url
-        self.session = session or requests.Session()
+        # AnkiConnect closes each response without advertising Connection: close.
+        self.session = session or requests
         self.timeout = timeout
 
     def _invoke(self, action: str, **params: Any) -> Any:
@@ -102,7 +102,7 @@ class AnkiConnector:
         """Validate the deck and create-or-validate the fixed V2 note type.
 
         Args:
-            profile: One of the two fixed V2 profiles.
+            profile: A registered V2 language profile.
             deck_name: Existing disposable QA deck.
 
         Raises:
@@ -194,7 +194,7 @@ class AnkiConnector:
         """Create one V2 note, which yields the profile's two card templates.
 
         Args:
-            profile: One of the two fixed V2 profiles.
+            profile: A registered V2 language profile.
             deck_name: Existing target deck.
             fields: Ordered field mapping for the profile note type.
 
@@ -225,5 +225,5 @@ class AnkiConnector:
 
     @staticmethod
     def _require_v2_profile(profile: Profile) -> None:
-        if profile not in V2_PROFILES:
+        if not is_registered_profile(profile):
             raise AnkiConnectError("profile", "Somente note types V2 podem ser modificados")

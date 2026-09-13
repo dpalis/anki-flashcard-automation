@@ -9,6 +9,10 @@
     "spanish_travel": {
       "deck_name": "Anki Automation V2 QA",
       "anthropic_model": "claude-sonnet-4-6"
+    },
+    "japanese_travel": {
+      "deck_name": "Anki Automation V2 Japanese QA",
+      "anthropic_model": "claude-sonnet-4-6"
     }
   }
 }

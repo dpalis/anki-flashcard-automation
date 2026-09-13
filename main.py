@@ -18,15 +18,12 @@ from modules.audio_provider import AudioProviderError, GeminiAudioProvider
 from modules.card_formatter import build_note_fields
 from modules.image_provider import PollinationsImageProvider
 from modules.llm_provider import ClaudeProvider, ProviderError
-from modules.profiles import ENGLISH_VOCABULARY, get_profile, validate_profile_content
+from modules.profiles import Profile, get_profile, profile_ids, validate_profile_content
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SETTINGS_FILE = BASE_DIR / "config" / "settings.json"
-STORAGE_BYTES_PER_ITEM = {
-    "english_vocabulary": (88 * 1024, 364 * 1024),
-    "spanish_travel": (88 * 1024, 364 * 1024),
-}
+STORAGE_BYTES_PER_ITEM = (88 * 1024, 364 * 1024)
 POLLINATIONS_IMAGE_ESTIMATED_COST_USD = 0.002
 
 
@@ -53,39 +50,46 @@ def canonicalize_input(value: str) -> str:
     return _normalize_input(value).casefold()
 
 
-def _english_inputs_share_identity(first: str, second: str) -> bool:
+def _profile_inputs_share_identity(profile: Profile, first: str, second: str) -> bool:
     first_normalized = _normalize_input(first)
     second_normalized = _normalize_input(second)
     first_canonical = first_normalized.casefold()
     second_canonical = second_normalized.casefold()
-    first_marker = first_normalized.startswith("to ")
-    second_marker = second_normalized.startswith("to ")
+    marker = profile.identity_alias_prefix
+    if marker is None:
+        return first_canonical == second_canonical
+    first_marker = first_normalized.startswith(marker)
+    second_marker = second_normalized.startswith(marker)
 
     if first_canonical == second_canonical:
-        if first_canonical.startswith("to "):
+        if first_canonical.startswith(marker):
             return first_marker == second_marker
         return True
-    if first_marker and not second_canonical.startswith("to "):
-        return first_canonical[3:] == second_canonical
-    if second_marker and not first_canonical.startswith("to "):
-        return second_canonical[3:] == first_canonical
+    marker_length = len(marker)
+    if first_marker and not second_canonical.startswith(marker):
+        return first_canonical[marker_length:] == second_canonical
+    if second_marker and not first_canonical.startswith(marker):
+        return second_canonical[marker_length:] == first_canonical
     return False
 
 
 def identity_variants(profile_id: str, value: str) -> tuple[str, ...]:
     """Return the spellings that identify the same requested study item."""
+    profile = get_profile(profile_id)
     normalized = _normalize_input(value)
     canonical = normalized.casefold()
     if not canonical:
         raise ValueError("A entrada n\u00e3o pode ser vazia")
     variants = [canonical]
-    if profile_id == ENGLISH_VOCABULARY.profile_id:
-        if normalized.startswith("to "):
-            lexical = canonical[3:].strip()
+    marker = profile.identity_alias_prefix
+    if marker:
+        marker_length = len(marker)
+        if normalized.startswith(marker):
+            lexical = canonical[marker_length:].strip()
             if lexical:
                 variants.append(lexical)
-        elif not canonical.startswith("to "):
-            variants.append(f"to {canonical}")
+        elif not canonical.startswith(marker):
+            variants.append(f"{marker}{canonical}")
     return tuple(dict.fromkeys(variants))
 
 
@@ -104,7 +108,7 @@ def estimate_storage(profile_id: str, item_count: int) -> dict[str, int]:
     get_profile(profile_id)
     if type(item_count) is not int or item_count < 0:
         raise ValueError("A quantidade de itens deve ser um inteiro não negativo")
-    minimum, maximum = STORAGE_BYTES_PER_ITEM[profile_id]
+    minimum, maximum = STORAGE_BYTES_PER_ITEM
     return {
         "items": item_count,
         "min_bytes": item_count * minimum,
@@ -180,7 +184,8 @@ def process_item(
     for index, candidate_id in enumerate(candidate_ids):
         for existing_input in _anki_call("identity", anki.find_exact_items, candidate_id):
             existing_input = unescape(existing_input)
-            if profile is ENGLISH_VOCABULARY and not _english_inputs_share_identity(
+            if profile.identity_alias_prefix and not _profile_inputs_share_identity(
+                profile,
                 item,
                 existing_input,
             ):
@@ -206,9 +211,9 @@ def process_item(
             f"Foram encontradas {len(exact)} notes com a mesma identidade; verifique no Anki",
         )
 
-    if profile is ENGLISH_VOCABULARY:
+    if profile.reads_legacy_index:
         if any(
-            _english_inputs_share_identity(item, legacy_item)
+            _profile_inputs_share_identity(profile, item, legacy_item)
             for legacy_item in load_legacy_blocklist(legacy_path)
         ):
             return {
@@ -257,10 +262,13 @@ def process_item(
         "estimated_cost_usd": POLLINATIONS_IMAGE_ESTIMATED_COST_USD,
     }
 
-    audio_text = content["term"] if profile is ENGLISH_VOCABULARY else content["phrase_es"]
-    audio_locale = "en-US" if profile is ENGLISH_VOCABULARY else "es-US"
+    audio_text = content[profile.target_field]
     try:
-        audio_bytes, audio_metrics = audio_provider.generate(audio_text, audio_locale)
+        audio_bytes, audio_metrics = audio_provider.generate(
+            audio_text,
+            profile.audio_locale,
+            profile.audio_instruction,
+        )
     except Exception as exc:
         raise ProcessError("audio_provider", _redact_secrets(str(exc))) from exc
     if not isinstance(audio_bytes, bytes) or not isinstance(audio_metrics, dict):
@@ -375,9 +383,9 @@ def read_items_file(path: str | Path) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Cria notes V2 de ingl\u00eas ou espanhol no Anki")
+    parser = argparse.ArgumentParser(description="Cria notes V2 de idiomas suportados no Anki")
     parser.add_argument("--json", action="store_true", help="L\u00ea um pedido JSON de stdin")
-    parser.add_argument("--profile", choices=("english_vocabulary", "spanish_travel"))
+    parser.add_argument("--profile", choices=profile_ids())
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--item", help="Processa um item")
     source.add_argument("--file", type=Path, help="Processa um item por linha, sem alterar o arquivo")
@@ -487,7 +495,7 @@ def _run_configured(profile_id: str, items: list[str], settings_path: Path) -> d
                 f"Credencial de ambiente ausente: {', '.join(missing_keys)}",
             )
 
-        if profile is ENGLISH_VOCABULARY:
+        if profile.reads_legacy_index:
             legacy_path = _resolve_setting_path(
                 settings_path, settings.get("legacy_index_path"), "legacy_index_path"
             )

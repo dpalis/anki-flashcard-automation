@@ -1,4 +1,4 @@
-> **V2 em execução:** `docs/plans/2026-08-19-1427-feat-anki-automation-v2-foundation-plan.md` governa o trabalho atual; as instruções V1 abaixo são históricas.
+> **V2 em execução:** o plano de fundação governa os invariantes atuais; a expansão adiciona perfis linguísticos explícitos sem mudar o contrato dos cards. As instruções V1 abaixo são históricas.
 
 # CLAUDE.md
 

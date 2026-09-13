@@ -30,8 +30,11 @@ from modules.card_formatter import build_note_fields
 from modules.llm_provider import ClaudeProvider, ProviderError
 from modules.profiles import (
     ENGLISH_VOCABULARY,
+    JAPANESE_TRAVEL,
+    LANGUAGE_PROFILES,
     SPANISH_TRAVEL,
     get_profile,
+    profile_ids,
     validate_profile_content,
 )
 
@@ -79,6 +82,28 @@ def spanish_content(**overrides):
     return value
 
 
+def japanese_content(**overrides):
+    value = {
+        "phrase_ja": "予約をお願いします。",
+        "romaji": "Yoyaku o onegai shimasu.",
+        "ipa": "/jojakɯ o oneɡai ɕimasɯ/",
+        "register": "polite",
+        "senses": [
+            {
+                "definition_pt_br": "Forma cortês de pedir uma reserva em um hotel ou restaurante.",
+                "meaning_pt_br": "Gostaria de fazer uma reserva.",
+                "example_romaji": "Ashita no yoru, futari de yoyaku o onegai shimasu.",
+            }
+        ],
+        "visual_prompt_en": (
+            "A traveler politely asking a hotel receptionist for a reservation, "
+            "without text or numbers."
+        ),
+    }
+    value.update(overrides)
+    return value
+
+
 class FakeProvider:
     def __init__(self, content) -> None:
         self.content = content
@@ -104,8 +129,8 @@ class FakeAudioProvider:
     def __init__(self) -> None:
         self.calls = []
 
-    def generate(self, text, locale):
-        self.calls.append((text, locale))
+    def generate(self, text, locale, instruction):
+        self.calls.append((text, locale, instruction))
         return b"ID3-audio", {"mp3_bytes": 9}
 
 
@@ -187,11 +212,18 @@ class CoreIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unicode"):
             item_id_for("spanish_travel", "\ud800")
 
-    def test_only_the_two_fixed_profiles_exist(self):
+    def test_language_profiles_are_registered_without_changing_existing_ids(self):
         self.assertIs(ENGLISH_VOCABULARY, get_profile("english_vocabulary"))
         self.assertIs(SPANISH_TRAVEL, get_profile("spanish_travel"))
+        self.assertIs(JAPANESE_TRAVEL, get_profile("japanese_travel"))
+        self.assertEqual(
+            ("english_vocabulary", "spanish_travel", "japanese_travel"),
+            profile_ids(),
+        )
+        self.assertEqual("Anki Automation V2 - Japanese", JAPANESE_TRAVEL.note_type)
+        self.assertEqual(("to hint",), identity_variants("japanese_travel", "  TO   Hint "))
         with self.assertRaises(ValueError):
-            get_profile("japanese")
+            get_profile("unknown_language")
 
 
 class SchemaTests(unittest.TestCase):
@@ -205,6 +237,56 @@ class SchemaTests(unittest.TestCase):
             }
         )
         self.assertEqual(content, validate_profile_content(ENGLISH_VOCABULARY, content))
+
+    def test_japanese_schema_accepts_romaji_and_rejects_non_latin_display_text(self):
+        content = japanese_content()
+        self.assertEqual(content, validate_profile_content(JAPANESE_TRAVEL, content))
+        for invalid in (
+            japanese_content(register="regional"),
+            japanese_content(romaji=""),
+            japanese_content(romaji="123"),
+            japanese_content(romaji="予約"),
+            japanese_content(romaji="Yoyaku。"),
+            japanese_content(romaji="よやく — 予約"),
+            japanese_content(romaji="よやく — Yoyaku — reservation"),
+        ):
+            with self.subTest(content=invalid):
+                with self.assertRaises(ValueError):
+                    validate_profile_content(JAPANESE_TRAVEL, invalid)
+        for field in ("definition_pt_br", "meaning_pt_br", "example_romaji"):
+            invalid = japanese_content()
+            invalid["senses"][0][field] = "予約"
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_profile_content(JAPANESE_TRAVEL, invalid)
+        self.assertEqual(
+            "Tōkyō eki wa doko desu ka?",
+            validate_profile_content(
+                JAPANESE_TRAVEL,
+                japanese_content(romaji="Tōkyō eki wa doko desu ka?"),
+            )["romaji"],
+        )
+
+    def test_japanese_portuguese_explanations_accept_ordinals(self):
+        for field in ("definition_pt_br", "meaning_pt_br"):
+            for text in ("Assento de 1ª classe.", "Balcão no 2º andar."):
+                content = japanese_content()
+                content["senses"][0][field] = text
+                with self.subTest(field=field, text=text):
+                    self.assertEqual(content, validate_profile_content(JAPANESE_TRAVEL, content))
+
+    def test_japanese_requires_separate_romaji_and_ipa(self):
+        content = japanese_content(ipa="/toːkʲoː eki wa doko desɯ̥ ka/")
+        self.assertEqual(content, validate_profile_content(JAPANESE_TRAVEL, content))
+        self.assertEqual(set(content), set(JAPANESE_TRAVEL.output_schema["required"]))
+        for field in ("romaji", "ipa"):
+            for invalid_value in (None, "", "予約"):
+                invalid = japanese_content(**{field: invalid_value})
+                with self.subTest(field=field, value=invalid_value), self.assertRaises(ValueError):
+                    validate_profile_content(JAPANESE_TRAVEL, invalid)
+            missing = japanese_content()
+            del missing[field]
+            with self.subTest(missing=field), self.assertRaises(ValueError):
+                validate_profile_content(JAPANESE_TRAVEL, missing)
 
     def test_schemas_reject_extra_missing_empty_and_refusal(self):
         cases = [
@@ -326,6 +408,75 @@ class ProcessItemTests(unittest.TestCase):
         )
         self.assertEqual("created", result["kind"])
         self.assertEqual(1, len(provider.calls))
+
+    def test_japanese_uses_the_shared_flow_without_reading_the_english_legacy_index(self):
+        provider = FakeProvider(japanese_content())
+        audio = FakeAudioProvider()
+        anki = FakeAnki()
+        result = self.call(
+            "Gostaria de fazer uma reserva",
+            "japanese_travel",
+            provider,
+            anki,
+            self.base / "missing.json",
+            audio_provider=audio,
+        )
+        self.assertEqual("created", result["kind"])
+        self.assertEqual(
+            [
+                (
+                    "予約をお願いします。",
+                    "ja-JP",
+                    JAPANESE_TRAVEL.audio_instruction,
+                )
+            ],
+            audio.calls,
+        )
+        fields = [call for call in anki.calls if call[0] == "addNote"][0][3]
+        self.assertEqual("Yoyaku o onegai shimasu.", fields["Target"])
+        self.assertIn("<div>/jojakɯ o oneɡai ɕimasɯ/</div>", fields["ContentHtml"])
+
+    def test_malformed_japanese_pronunciation_stops_before_media_or_note_write(self):
+        image = FakeImageProvider()
+        audio = FakeAudioProvider()
+        anki = FakeAnki()
+        with self.assertRaises(ProcessError) as raised:
+            self.call(
+                "Gostaria de fazer uma reserva",
+                "japanese_travel",
+                FakeProvider(japanese_content(romaji="よやく — Yoyaku")),
+                anki,
+                self.base / "missing.json",
+                image_provider=image,
+                audio_provider=audio,
+            )
+        self.assertEqual("validation", raised.exception.stage)
+        self.assertEqual([], image.calls)
+        self.assertEqual([], audio.calls)
+        self.assertFalse(
+            any(call[0] in {"store_media", "addNote"} for call in anki.calls)
+        )
+
+    def test_missing_japanese_ipa_stops_before_media_or_note_write(self):
+        image = FakeImageProvider()
+        audio = FakeAudioProvider()
+        anki = FakeAnki()
+        content = japanese_content()
+        del content["ipa"]
+        with self.assertRaises(ProcessError) as raised:
+            self.call(
+                "Gostaria de fazer uma reserva",
+                "japanese_travel",
+                FakeProvider(content),
+                anki,
+                self.base / "missing.json",
+                image_provider=image,
+                audio_provider=audio,
+            )
+        self.assertEqual("validation", raised.exception.stage)
+        self.assertEqual([], image.calls)
+        self.assertEqual([], audio.calls)
+        self.assertFalse(any(call[0] in {"store_media", "addNote"} for call in anki.calls))
 
     def test_legacy_match_skips_with_unicode_case_and_spacing_variants(self):
         legacy = self.write_legacy(json.dumps({" CAF\u00c9   AU LAIT ": {}}))
@@ -652,7 +803,7 @@ class ProcessItemTests(unittest.TestCase):
 
 
 class ProfileAndFormattingTests(unittest.TestCase):
-    def test_both_profiles_share_the_exact_two_card_contract(self):
+    def test_registered_language_profiles_share_the_exact_two_card_contract(self):
         expected_fields = ("ItemId", "Input", "Target", "ContentHtml", "Image", "MainAudio")
         expected_templates = ("Target to Meaning", "Image to Target")
         expected_css = (
@@ -664,7 +815,7 @@ class ProfileAndFormattingTests(unittest.TestCase):
             "    background-color: white;\n"
             "}\n"
         )
-        for profile in (ENGLISH_VOCABULARY, SPANISH_TRAVEL):
+        for profile in LANGUAGE_PROFILES:
             with self.subTest(profile=profile.profile_id):
                 self.assertEqual(expected_fields, profile.fields)
                 self.assertEqual(expected_templates, tuple(profile.templates))
@@ -756,6 +907,27 @@ class ProfileAndFormattingTests(unittest.TestCase):
         self.assertNotIn("/[", fields["ContentHtml"])
         self.assertTrue(fields["Image"].startswith('<img src="aa2_'))
 
+    def test_japanese_keeps_romaji_target_and_places_ipa_below_classification(self):
+        fields = build_note_fields(
+            JAPANESE_TRAVEL,
+            "Gostaria de fazer uma reserva",
+            "c" * 64,
+            japanese_content(ipa="[jojakɯ o oneɡai ɕimasɯ]"),
+            "aa2_" + "c" * 64 + "_image.jpg",
+            "aa2_" + "c" * 64 + "_main.mp3",
+        )
+        body = fields["ContentHtml"]
+        self.assertEqual("Yoyaku o onegai shimasu.", fields["Target"])
+        self.assertIn("Forma cortês de pedir uma reserva", body)
+        self.assertIn("Ex.: Ashita no yoru, futari de yoyaku o onegai shimasu.", body)
+        self.assertIn("Gostaria de fazer uma reserva.", body)
+        self.assertIn(">Polite<", body)
+        self.assertIn("<div>Polite</div><div>/jojakɯ o oneɡai ɕimasɯ/</div>", body)
+        self.assertNotIn(">Yoyaku o onegai shimasu.<", body)
+        self.assertNotIn("/[", body)
+        self.assertEqual("[sound:aa2_" + "c" * 64 + "_main.mp3]", fields["MainAudio"])
+        self.assertNotRegex(fields["Target"] + body, r"[\u3000-\u30ff\u3400-\u9fff]")
+
 
 class FakeResponse:
     def __init__(self, payload=None, json_error=None):
@@ -789,6 +961,24 @@ def ok(result):
 
 
 class AnkiConnectorTests(unittest.TestCase):
+    def test_default_transport_uses_independent_requests_with_timeout(self):
+        with (
+            patch("modules.anki_connector.requests.post", side_effect=[ok([]), ok([])]) as post,
+            patch("modules.anki_connector.requests.Session") as pooled_session,
+        ):
+            connector = AnkiConnector(timeout=7)
+            for item_id in ("a" * 64, "b" * 64):
+                self.assertEqual([], connector.find_exact_items(item_id))
+            pooled_session.assert_not_called()
+            self.assertEqual(2, post.call_count)
+            for call, item_id in zip(post.call_args_list, ("a" * 64, "b" * 64)):
+                self.assertEqual(("http://localhost:8765",), call.args)
+                self.assertEqual(7, call.kwargs["timeout"])
+                self.assertEqual(
+                    {"action": "findNotes", "version": 6, "params": {"query": f"ItemId:{item_id}"}},
+                    call.kwargs["json"],
+                )
+
     def test_find_notes_postfilters_exact_item_id(self):
         item_id = "a" * 64
         session = QueueSession(
@@ -912,7 +1102,7 @@ class AnkiConnectorTests(unittest.TestCase):
         self.assertEqual(1, len(session.calls))
 
     def test_successful_add_note_uses_the_exact_profile_contract(self):
-        for profile in (ENGLISH_VOCABULARY, SPANISH_TRAVEL):
+        for profile in LANGUAGE_PROFILES:
             with self.subTest(profile=profile.profile_id):
                 fields = {name: f"value-{name}" for name in profile.fields}
                 session = QueueSession([ok(1234)])
@@ -1112,7 +1302,8 @@ class AnthropicStructuredOutputTests(unittest.TestCase):
     def test_prompts_require_pareto_content_and_one_image_for_displayed_meanings(self):
         english = (ROOT / "config" / "prompt_template.txt").read_text(encoding="utf-8")
         spanish = (ROOT / "config" / "spanish_prompt_template.txt").read_text(encoding="utf-8")
-        for prompt in (english, spanish):
+        japanese = (ROOT / "config" / "japanese_prompt_template.txt").read_text(encoding="utf-8")
+        for prompt in (english, spanish, japanese):
             with self.subTest(prompt=prompt[:20]):
                 self.assertIn("significados apresentados", prompt)
                 self.assertIn("significado mais comum", prompt)
@@ -1145,6 +1336,14 @@ class AnthropicStructuredOutputTests(unittest.TestCase):
         self.assertIn("sentence case", english)
         self.assertIn("`to ` em minúsculas", english)
         self.assertIn("não use `to`", english.casefold())
+        self.assertIn("romaji", japanese)
+        self.assertIn("Hepburn", japanese)
+        self.assertIn("`romaji`", japanese)
+        self.assertIn("`ipa`", japanese)
+        self.assertIn("IPA", japanese)
+        self.assertNotIn("katakana, IPA", japanese)
+        self.assertIn("viagem ao Japão", japanese)
+        self.assertIn("não use linguagem honorífica elaborada", japanese)
 
 
 class CliContractTests(unittest.TestCase):
@@ -1153,6 +1352,7 @@ class CliContractTests(unittest.TestCase):
         self.assertIn("--profile", help_text)
         self.assertIn("--item", help_text)
         self.assertIn("--file", help_text)
+        self.assertIn("japanese_travel", help_text)
         self.assertNotIn("reset", help_text.lower())
 
     def test_input_file_is_read_only(self):
@@ -1179,7 +1379,30 @@ class CliContractTests(unittest.TestCase):
                 self.assertEqual("error", payload["status"])
                 self.assertEqual(1, len(completed.stdout.strip().splitlines()))
 
-    def test_valid_json_uses_the_same_flow_for_both_profiles(self):
+    def test_wrapper_previews_an_unconfirmed_japanese_request_without_side_effects(self):
+        request = {
+            "profile": "japanese_travel",
+            "items": ["Onde fica a estação?"],
+            "confirmed": False,
+        }
+        completed = subprocess.run(
+            ["./run.sh", "--json"],
+            cwd=ROOT,
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, completed.returncode)
+        payload = json.loads(completed.stdout)
+        self.assertEqual("needs_confirmation", payload["status"])
+        self.assertEqual(1, payload["estimate"]["items"])
+        self.assertEqual([], payload["created"])
+        self.assertEqual([], payload["skipped"])
+        self.assertIsNone(payload["error"])
+        self.assertEqual(1, len(completed.stdout.strip().splitlines()))
+
+    def test_valid_json_uses_the_same_flow_for_registered_language_profiles(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             settings_path = base / "config" / "settings.json"
@@ -1200,6 +1423,10 @@ class CliContractTests(unittest.TestCase):
                                 "deck_name": "QA",
                                 "anthropic_model": "claude-sonnet-4-6",
                             },
+                            "japanese_travel": {
+                                "deck_name": "QA",
+                                "anthropic_model": "claude-sonnet-4-6",
+                            },
                         },
                     }
                 ),
@@ -1209,6 +1436,11 @@ class CliContractTests(unittest.TestCase):
             cases = (
                 ("english_vocabulary", "polish", english_content()),
                 ("spanish_travel", "Quero pagar", spanish_content()),
+                (
+                    "japanese_travel",
+                    "Gostaria de fazer uma reserva",
+                    japanese_content(),
+                ),
             )
             for profile_id, item, content in cases:
                 with self.subTest(profile=profile_id):
