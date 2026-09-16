@@ -295,6 +295,13 @@ def validate_profile_content(profile: Profile, content: Any) -> dict[str, Any]:
         ):
             raise ValueError("ipa deve conter a transcrição fonética, sem escrita japonesa")
 
+    # Pontuação, diacríticos e modificadores (ː, ˈ, ʲ) sozinhos não são pronúncia.
+    if not any(
+        unicodedata.category(character) in {"Ll", "Lu", "Lt"}
+        for character in content[profile.pronunciation_field]
+    ):
+        raise ValueError("ipa deve conter letras fonéticas, não apenas pontuação ou modificadores")
+
     classification = content[profile.classification_field]
     if profile.classification_multiple:
         if not isinstance(classification, list) or not classification:
