@@ -227,6 +227,22 @@ class CoreIdentityTests(unittest.TestCase):
 
 
 class SchemaTests(unittest.TestCase):
+    def test_ipa_requires_a_base_letter_in_every_language(self):
+        for profile, fixture in (
+            (ENGLISH_VOCABULARY, english_content),
+            (SPANISH_TRAVEL, spanish_content),
+            (JAPANESE_TRAVEL, japanese_content),
+        ):
+            for ipa in (",", "/,/", "[,]", "//", "/123/", "/ːˈʲ/", "/̥/"):
+                with self.subTest(profile=profile.profile_id, ipa=ipa):
+                    with self.assertRaisesRegex(ValueError, "ipa deve conter letras fonéticas"):
+                        validate_profile_content(profile, fixture(ipa=ipa))
+            for ipa in ("/a/", "[θ]", "/β/", "/toːkʲoː desɯ̥/", "kaːdo"):
+                with self.subTest(profile=profile.profile_id, ipa=ipa):
+                    self.assertEqual(
+                        ipa, validate_profile_content(profile, fixture(ipa=ipa))["ipa"]
+                    )
+
     def test_english_schema_accepts_multiple_complete_senses(self):
         content = english_content()
         content["senses"].append(
@@ -278,6 +294,8 @@ class SchemaTests(unittest.TestCase):
         content = japanese_content(ipa="/toːkʲoː eki wa doko desɯ̥ ka/")
         self.assertEqual(content, validate_profile_content(JAPANESE_TRAVEL, content))
         self.assertEqual(set(content), set(JAPANESE_TRAVEL.output_schema["required"]))
+        with self.assertRaisesRegex(ValueError, "sem escrita japonesa"):
+            validate_profile_content(JAPANESE_TRAVEL, japanese_content(ipa="予約"))
         for field in ("romaji", "ipa"):
             for invalid_value in (None, "", "予約"):
                 invalid = japanese_content(**{field: invalid_value})
@@ -456,6 +474,26 @@ class ProcessItemTests(unittest.TestCase):
         self.assertFalse(
             any(call[0] in {"store_media", "addNote"} for call in anki.calls)
         )
+
+    def test_punctuation_only_japanese_ipa_stops_before_media_or_note_write(self):
+        image = FakeImageProvider()
+        audio = FakeAudioProvider()
+        anki = FakeAnki()
+        with self.assertRaises(ProcessError) as raised:
+            self.call(
+                "Posso pagar com cartão?",
+                "japanese_travel",
+                FakeProvider(japanese_content(ipa="/,/")),
+                anki,
+                self.base / "missing.json",
+                image_provider=image,
+                audio_provider=audio,
+            )
+        self.assertEqual("validation", raised.exception.stage)
+        self.assertIn("ipa", str(raised.exception))
+        self.assertEqual([], image.calls)
+        self.assertEqual([], audio.calls)
+        self.assertFalse(any(call[0] in {"store_media", "addNote"} for call in anki.calls))
 
     def test_missing_japanese_ipa_stops_before_media_or_note_write(self):
         image = FakeImageProvider()
