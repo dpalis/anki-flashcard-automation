@@ -44,6 +44,7 @@ CARD_TEMPLATES = {
 
 SPANISH_REGISTERS = ("neutral", "informal", "formal")
 JAPANESE_REGISTERS = ("neutral", "informal", "polite", "formal")
+ARABIC_REGISTERS = ("neutral", "informal", "polite", "formal")
 
 
 def _language_schema(
@@ -115,6 +116,17 @@ JAPANESE_SCHEMA = _language_schema(
 )
 JAPANESE_SCHEMA["properties"]["romaji"] = {"type": "string"}
 JAPANESE_SCHEMA["required"].append("romaji")
+
+ARABIC_SCHEMA = _language_schema(
+    target_field="phrase_ar",
+    pronunciation_field="ipa",
+    classification_field="register",
+    classification_schema={"type": "string", "enum": list(ARABIC_REGISTERS)},
+    definition_field="definition_pt_br",
+    example_field="example_romanization",
+)
+ARABIC_SCHEMA["properties"]["romanization"] = {"type": "string"}
+ARABIC_SCHEMA["required"].append("romanization")
 
 
 @dataclass(frozen=True)
@@ -216,7 +228,32 @@ JAPANESE_TRAVEL = Profile(
     romanization_field="romaji",
 )
 
-LANGUAGE_PROFILES = (ENGLISH_VOCABULARY, SPANISH_TRAVEL, JAPANESE_TRAVEL)
+ARABIC_TRAVEL = Profile(
+    profile_id="arabic_travel",
+    note_type="Anki Automation V2 - Arabic",
+    fields=CARD_FIELDS,
+    templates=CARD_TEMPLATES,
+    css=CARD_CSS,
+    prompt_filename="arabic_prompt_template.txt",
+    tags=("anki-automation-v2", "arabic", "travel", "uae"),
+    output_schema=ARABIC_SCHEMA,
+    target_field="phrase_ar",
+    pronunciation_field="ipa",
+    classification_field="register",
+    definition_field="definition_pt_br",
+    example_field="example_romanization",
+    audio_locale="ar-AE",
+    audio_instruction=(
+        "Use natural Emirati Gulf Arabic as spoken in Dubai, United Arab Emirates, "
+        "at a clear, comfortable study pace. Preserve the transcript's colloquial "
+        "wording and vowel lengths; do not translate it into Modern Standard Arabic "
+        "or substitute Egyptian or Levantine pronunciation."
+    ),
+    allowed_classifications=ARABIC_REGISTERS,
+    romanization_field="romanization",
+)
+
+LANGUAGE_PROFILES = (ENGLISH_VOCABULARY, SPANISH_TRAVEL, JAPANESE_TRAVEL, ARABIC_TRAVEL)
 _PROFILES_BY_ID = {profile.profile_id: profile for profile in LANGUAGE_PROFILES}
 
 
@@ -259,16 +296,21 @@ def _validate_senses(content: dict[str, Any], fields: set[str]) -> None:
 
 def _require_latin_text(value: str, field: str) -> None:
     # Portuguese ordinal indicators are alphabetic but lack LATIN in their Unicode names.
-    letters = [character for character in value if character.isalpha() and character not in "ªº"]
+    # ʿ e ʾ representam ayn e hamza na romanização árabe.
+    letters = [
+        character for character in value
+        if character.isalpha() and character not in "ªºʿʾ"
+    ]
     if (
         not letters
         or any("LATIN" not in unicodedata.name(character, "") for character in letters)
         or any(
             "\u3000" <= character <= "\u303f" or "\uff00" <= character <= "\uffef"
+            or "ARABIC" in unicodedata.name(character, "")
             for character in value
         )
     ):
-        raise ValueError(f"{field} deve usar somente alfabeto latino, sem escrita japonesa")
+        raise ValueError(f"{field} deve usar somente alfabeto latino, sem escrita japonesa ou árabe")
 
 
 def validate_profile_content(profile: Profile, content: Any) -> dict[str, Any]:
@@ -286,14 +328,22 @@ def validate_profile_content(profile: Profile, content: Any) -> dict[str, Any]:
     ):
         _require_non_empty_string(content[field], field)
     if profile.romanization_field:
-        romaji = content[profile.romanization_field]
-        _require_non_empty_string(romaji, profile.romanization_field)
-        _require_latin_text(romaji, profile.romanization_field)
+        romanization = content[profile.romanization_field]
+        _require_non_empty_string(romanization, profile.romanization_field)
+        _require_latin_text(romanization, profile.romanization_field)
         if re.search(
             r"[\u3000-\u30ff\u3400-\u9fff\uff00-\uffef]",
             content[profile.pronunciation_field],
+        ) or any(
+            "ARABIC" in unicodedata.name(char, "")
+            for char in content[profile.pronunciation_field]
         ):
-            raise ValueError("ipa deve conter a transcrição fonética, sem escrita japonesa")
+            raise ValueError("ipa deve conter a transcrição fonética, sem escrita japonesa ou árabe")
+
+    if profile is ARABIC_TRAVEL:
+        letters = [char for char in content[profile.target_field] if char.isalpha()]
+        if not letters or any("ARABIC" not in unicodedata.name(char, "") for char in letters):
+            raise ValueError("phrase_ar deve conter a frase em escrita árabe para o áudio")
 
     # Pontuação, diacríticos e modificadores (ː, ˈ, ʲ) sozinhos não são pronúncia.
     if not any(
