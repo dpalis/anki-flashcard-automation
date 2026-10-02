@@ -13,6 +13,10 @@
     "japanese_travel": {
       "deck_name": "Anki Automation V2 Japanese QA",
       "anthropic_model": "claude-sonnet-4-6"
+    },
+    "arabic_travel": {
+      "deck_name": "Árabe para Viagem",
+      "anthropic_model": "claude-opus-4-6"
     }
   }
 }

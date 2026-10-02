@@ -1,7 +1,7 @@
 # Anki Automation - Gerador Automático de Flashcards
 
 > **Estado atual da V2:** a entrada `./run.sh --json` aceita os perfis explícitos
-> `english_vocabulary`, `spanish_travel` e `japanese_travel`. Cada perfil aponta
+> `english_vocabulary`, `spanish_travel`, `japanese_travel` e `arabic_travel`. Cada perfil aponta
 > para um deck já existente; a aplicação não cria decks. As instruções detalhadas
 > abaixo descrevem a V1 e permanecem apenas como referência histórica.
 
@@ -27,6 +27,22 @@ No perfil japonês, frase e exemplos aparecem em romaji (alfabeto latino), com
 explicações e traduções em português. A transcrição fonética em IPA aparece abaixo
 da classificação e antes do áudio, como no inglês. A escrita japonesa fica somente
 na geração de áudio, sem aparecer nos cards. Os demais perfis mantêm seu formato.
+
+O perfil `arabic_travel` segue o mesmo formato para viagens a Dubai: romanização
+em letras latinas, IPA, explicação e tradução em português e exemplo romanizado.
+Prioriza o árabe cotidiano dos Emirados. A escrita árabe fica em `phrase_ar`,
+somente para gerar o áudio com orientação de pronúncia emiradense. O destino
+configurado é `Árabe para Viagem`, que deve existir antes da criação. Cada note
+gera os cards expressão → significado e imagem → expressão.
+
+```json
+{"profile":"arabic_travel","items":["Obrigado","Eu quero água, por favor."],"confirmed":false}
+```
+
+O preview não gera conteúdo nem áudio. A mesma confirmação cobre o conjunto;
+a prevenção de duplicatas usa a identidade normalizada da entrada dentro do
+perfil, sem deduplicação semântica entre traduções ou romanizações diferentes.
+Validações estruturais não certificam sotaque: a adequação do áudio requer QA.
 
 Sistema modular em Python para automatizar a criação de flashcards no Anki, com vocabulário em inglês, definições geradas por LLM (Claude API) e imagens conceituais.
 

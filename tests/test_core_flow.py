@@ -217,7 +217,7 @@ class CoreIdentityTests(unittest.TestCase):
         self.assertIs(SPANISH_TRAVEL, get_profile("spanish_travel"))
         self.assertIs(JAPANESE_TRAVEL, get_profile("japanese_travel"))
         self.assertEqual(
-            ("english_vocabulary", "spanish_travel", "japanese_travel"),
+            ("english_vocabulary", "spanish_travel", "japanese_travel", "arabic_travel"),
             profile_ids(),
         )
         self.assertEqual("Anki Automation V2 - Japanese", JAPANESE_TRAVEL.note_type)
