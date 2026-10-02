@@ -1143,9 +1143,16 @@ class AnkiConnectorTests(unittest.TestCase):
         for profile in LANGUAGE_PROFILES:
             with self.subTest(profile=profile.profile_id):
                 fields = {name: f"value-{name}" for name in profile.fields}
-                session = QueueSession([ok(1234)])
+                stored = {
+                    "noteId": 1234, "modelName": profile.note_type,
+                    "fields": {key: {"value": value} for key, value in fields.items()},
+                    "cards": [41, 42],
+                }
+                cards = [{"cardId": card, "note": 1234, "deckName": "QA"} for card in (41, 42)]
+                session = QueueSession([ok(1234), ok([stored]), ok(cards)])
                 note_id = AnkiConnector(session=session).add_note(profile, "QA", fields)
                 self.assertEqual(1234, note_id)
+                self.assertEqual(["addNote", "notesInfo", "cardsInfo"], [c["action"] for c in session.calls])
                 note = session.calls[0]["params"]["note"]
                 self.assertEqual(
                     {
@@ -1157,6 +1164,37 @@ class AnkiConnectorTests(unittest.TestCase):
                     },
                     note,
                 )
+
+    def test_readback_failure_after_add_is_uncertain_without_repeating_write(self):
+        profile = JAPANESE_TRAVEL
+        fields = {name: f"value-{name}" for name in profile.fields}
+        stored = {
+            "noteId": 1234, "modelName": profile.note_type,
+            "fields": {key: {"value": value} for key, value in fields.items()},
+            "cards": [41, 42],
+        }
+        cards = [{"cardId": card, "note": 1234, "deckName": "QA"} for card in (41, 42)]
+        wrong_fields = copy.deepcopy(stored)
+        wrong_fields["fields"]["MainAudio"]["value"] = ""
+        cases = [
+            [requests.Timeout("readback timeout")],
+            [ok([])],
+            [ok([wrong_fields])],
+            [ok([{**stored, "cards": [41]}])],
+            [ok([stored]), requests.Timeout("cards timeout")],
+            [ok([stored]), ok(cards[:1])],
+            [ok([stored]), ok([cards[0], cards[0]])],
+            [ok([stored]), ok([{**card, "deckName": "Wrong"} for card in cards])],
+            [ok([stored]), ok([{**card, "note": 999} for card in cards])],
+        ]
+        for responses in cases:
+            with self.subTest(responses=responses):
+                session = QueueSession([ok(1234), *responses])
+                with self.assertRaises(AnkiConnectError) as raised:
+                    AnkiConnector(session=session).add_note(profile, "QA", fields)
+                self.assertTrue(raised.exception.outcome_uncertain)
+                self.assertIn("1234", str(raised.exception))
+                self.assertEqual(1, [c["action"] for c in session.calls].count("addNote"))
 
     def test_add_note_timeout_or_malformed_response_is_uncertain_and_not_retried(self):
         cases = [

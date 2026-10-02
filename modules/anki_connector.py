@@ -191,7 +191,7 @@ class AnkiConnector:
         deck_name: str,
         fields: dict[str, str],
     ) -> int:
-        """Create one V2 note, which yields the profile's two card templates.
+        """Create and read back one V2 note and its two cards.
 
         Args:
             profile: A registered V2 language profile.
@@ -199,7 +199,7 @@ class AnkiConnector:
             fields: Ordered field mapping for the profile note type.
 
         Returns:
-            Positive Anki note identifier.
+            Positive Anki note identifier after confirming its fields and cards.
 
         Raises:
             AnkiConnectError: If the payload or AnkiConnect result is invalid.
@@ -221,7 +221,47 @@ class AnkiConnector:
                 "O AnkiConnect n\u00e3o devolveu um note_id v\u00e1lido",
                 outcome_uncertain=True,
             )
+        self._verify_created_note(note_id, profile, deck_name, fields)
         return note_id
+
+    def _verify_created_note(
+        self, note_id: int, profile: Profile, deck_name: str, fields: dict[str, str],
+    ) -> None:
+        # A escrita já ocorreu: qualquer falha daqui em diante é resultado incerto.
+        try:
+            notes = self._invoke("notesInfo", notes=[note_id])
+            if not isinstance(notes, list) or len(notes) != 1:
+                raise ValueError("A note criada não foi encontrada na releitura")
+            note = notes[0]
+            stored_fields = {name: field["value"] for name, field in note["fields"].items()}
+            if (
+                note["noteId"] != note_id
+                or note["modelName"] != profile.note_type
+                or stored_fields != fields
+            ):
+                raise ValueError("O conteúdo persistido diverge da note enviada")
+            card_ids = note["cards"]
+            if (
+                not isinstance(card_ids, list)
+                or len(card_ids) != 2
+                or any(type(card_id) is not int or card_id <= 0 for card_id in card_ids)
+                or len(set(card_ids)) != 2
+            ):
+                raise ValueError("A note não possui os dois cards esperados")
+            cards = self._invoke("cardsInfo", cards=card_ids)
+            if (
+                not isinstance(cards, list)
+                or len(cards) != 2
+                or {card["cardId"] for card in cards} != set(card_ids)
+                or any(card["note"] != note_id or card["deckName"] != deck_name for card in cards)
+            ):
+                raise ValueError("Os cards persistidos não correspondem à note e ao deck")
+        except (AnkiConnectError, KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise AnkiConnectError(
+                "verifyNote",
+                f"Não foi possível confirmar a note {note_id}: {exc}. Não repetir a criação.",
+                outcome_uncertain=True,
+            ) from exc
 
     @staticmethod
     def _require_v2_profile(profile: Profile) -> None:
