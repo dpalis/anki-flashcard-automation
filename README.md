@@ -44,6 +44,11 @@ a prevenção de duplicatas usa a identidade normalizada da entrada dentro do
 perfil, sem deduplicação semântica entre traduções ou romanizações diferentes.
 Validações estruturais não certificam sotaque: a adequação do áudio requer QA.
 
+Após `addNote`, o AnkiConnect relê a note e os dois cards para confirmar os campos
+e o deck. Falha de transporte ou divergência nessa releitura é resultado incerto:
+o fluxo para sem repetir a criação. Essa verificação funciona com o Anki aberto,
+sem depender de acesso direto ao SQLite pelas consultas da bridge.
+
 Sistema modular em Python para automatizar a criação de flashcards no Anki, com vocabulário em inglês, definições geradas por LLM (Claude API) e imagens conceituais.
 
 ## 📋 Pré-requisitos
