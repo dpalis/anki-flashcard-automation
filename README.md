@@ -5,6 +5,21 @@
 > para um deck já existente; a aplicação não cria decks. As instruções detalhadas
 > abaixo descrevem a V1 e permanecem apenas como referência histórica.
 
+## Reparo de áudio V2
+
+`./run.sh --repair-json` lê um único pedido JSON em stdin. Usa um arquivo MP3/WAV
+já revisado sob os outputs da Galadriel (até 2 MiB), sem geração de mídia ou chaves
+pagas. `confirmed:false` produz uma prévia; `confirmed:true` exige o
+`expected_state` dessa prévia. A bridge expõe a mesma operação com aprovação.
+
+Campos: `profile`, `note_id`, `audio_path`, `audio_sha256`, `source_url`, `transcript`,
+`confirmed`; `fields` opcional permite somente `Target` e `ContentHtml`.
+O reparo confere modelo e deck V2, guarda mídia com nome derivado do conteúdo e
+preserva a antiga. Relê bytes, todos os campos, tags, IDs, agendamento e histórico.
+Conflito ou resultado incerto interrompe sem retry. O legado não é modificável.
+Essa verificação técnica não certifica a pronúncia; a gravação deve ser revisada
+antes de autorizar a aplicação. Não revise simultaneamente os mesmos cards.
+
 ## Entrada JSON da V2
 
 `./run.sh --json` recebe pela entrada padrão exatamente `profile` (texto),

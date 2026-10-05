@@ -1,4 +1,4 @@
-"""Minimal AnkiConnect client for new V2 notes only."""
+"""Minimal AnkiConnect client for V2 creation and scoped audio repair."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ ITEM_ID_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 MEDIA_FILENAME_PATTERN = re.compile(
     r"aa2_[0-9a-f]{64}_(?:image\.(?:jpg|png)|main\.mp3)\Z"
 )
-MUTATING_ACTIONS = frozenset({"createModel", "storeMediaFile", "addNote"})
+MUTATING_ACTIONS = frozenset({"createModel", "storeMediaFile", "addNote", "updateNoteFields"})
 
 
 class AnkiConnectError(Exception):
