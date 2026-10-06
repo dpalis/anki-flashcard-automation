@@ -33,6 +33,7 @@ class AnkiState:
         self.fail = None
         self.corrupt_media = False
         self.change_after_store = False
+        self.media_name_limit = None
     def post(self, url, *, json, timeout):
         action, p = json["action"], json["params"]
         self.calls.append(action)
@@ -45,9 +46,13 @@ class AnkiState:
             content = self.media.get(p["filename"])
             result = base64.b64encode(content).decode() if content is not None else False
         elif action == "storeMediaFile":
-            self.media[p["filename"]] = b"corrupt" if self.corrupt_media else base64.b64decode(p["data"])
+            filename = p["filename"]
+            if self.media_name_limit and len(filename.encode()) > self.media_name_limit:
+                suffix = Path(filename).suffix
+                filename = Path(filename).stem[:self.media_name_limit - len(suffix)] + suffix
+            self.media[filename] = b"corrupt" if self.corrupt_media else base64.b64decode(p["data"])
             if self.change_after_store: self.note["fields"]["Target"]["value"] = "concurrent edit"
-            result = p["filename"]
+            result = filename
         elif action == "updateNoteFields":
             for k,v in p["note"]["fields"].items(): self.note["fields"][k]["value"] = v
             result = None
@@ -98,6 +103,14 @@ class RepairTests(unittest.TestCase):
         self.state.note["fields"]["Target"]["value"] = "changed"
         with self.assertRaisesRegex(ValueError, "mudou"): self.run_request()
         self.assertNotIn("storeMediaFile", self.state.calls)
+    def test_apply_with_anki_media_filename_truncation(self):
+        self.state.media_name_limit = 119
+        preview = self.prepare()
+        result = self.run_request()
+        self.assertTrue(result["verified"])
+        self.assertLessEqual(len(preview["filename"].encode()), 119)
+        self.assertEqual(self.state.media[preview["filename"]], self.audio.read_bytes())
+        self.assertEqual(self.state.note["fields"]["MainAudio"]["value"], f"[sound:{preview['filename']}]")
     def test_concurrent_edit_during_upload_is_not_overwritten(self):
         self.prepare()
         self.state.change_after_store = True

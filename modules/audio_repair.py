@@ -113,7 +113,10 @@ def repair_note(request: dict, *, anki: AnkiConnector, deck_name: str,
         raise ValueError("Somente Target e ContentHtml podem acompanhar o áudio")
     data, extension = _audio(request["audio_path"], request["audio_sha256"], media_root)
     before = _snapshot(anki, request["note_id"], request["profile"], deck_name)
-    filename = f"aa2_{before['fields']['ItemId']}_audio_{request['audio_sha256']}.{extension}"
+    # Anki truncates long media names. Bind both full hashes into one digest so
+    # the requested filename survives storage unchanged (78 ASCII bytes).
+    media_id = _digest({"item_id": before["fields"]["ItemId"], "audio_sha256": request["audio_sha256"]})
+    filename = f"aa2_audio_{media_id}.{extension}"
     changes = {**patches, "MainAudio": f"[sound:{filename}]"}
     evidence = {"source_url": request["source_url"], "transcript": request["transcript"], "audio_sha256": request["audio_sha256"]}
     expected = _digest({"before": before, "changes": changes, **evidence})
