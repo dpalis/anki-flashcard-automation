@@ -1,0 +1,239 @@
+{
+  "incident": {
+    "date": "2026-10-15",
+    "reported_attempts_brt": [
+      "15:10",
+      "15:31"
+    ],
+    "profile": "english_vocabulary",
+    "item": "to Pick out",
+    "historical_response_body_available": false
+  },
+  "historical_errors": [
+    {
+      "source_observed_at": "2026-10-15T18:11:22.312Z",
+      "result": {
+        "status": "error",
+        "data": {
+          "status": "error",
+          "estimate": {
+            "items": 1,
+            "min_bytes": 90112,
+            "max_bytes": 372736
+          },
+          "created": [],
+          "skipped": [],
+          "error": {
+            "item": "to Pick out",
+            "stage": "audio_provider",
+            "message": "Falha na API de áudio Gemini: 400 Client Error: Bad Request for url: https://generativelanguage.googleapis.com/v1beta/interactions",
+            "outcome_uncertain": false
+          }
+        },
+        "message": "Falha na API de áudio Gemini: 400 Client Error: Bad Request for url: https://generativelanguage.googleapis.com/v1beta/interactions",
+        "duration_ms": 16248.9,
+        "completeness": ""
+      }
+    },
+    {
+      "source_observed_at": "2026-10-15T18:33:06.667Z",
+      "result": {
+        "status": "error",
+        "data": {
+          "status": "error",
+          "estimate": {
+            "items": 1,
+            "min_bytes": 90112,
+            "max_bytes": 372736
+          },
+          "created": [],
+          "skipped": [],
+          "error": {
+            "item": "to Pick out",
+            "stage": "audio_provider",
+            "message": "Falha na API de áudio Gemini: 400 Client Error: Bad Request for url: https://generativelanguage.googleapis.com/v1beta/interactions",
+            "outcome_uncertain": false
+          }
+        },
+        "message": "Falha na API de áudio Gemini: 400 Client Error: Bad Request for url: https://generativelanguage.googleapis.com/v1beta/interactions",
+        "duration_ms": 21434.2,
+        "completeness": ""
+      }
+    }
+  ],
+  "probes": [
+    {
+      "name": "original-probe.json",
+      "captured_at": "2026-10-15T19:26:15.098318+00:00",
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/interactions",
+        "method": "POST",
+        "headers": {
+          "Api-Revision": "2026-05-20",
+          "Content-Type": "application/json",
+          "x-goog-api-key": "[redacted]"
+        },
+        "json": {
+          "model": "gemini-3.1-flash-tts-preview",
+          "input": "Read only the transcript below, exactly once, without an introduction or extra words. Use clear, natural contemporary American English at a comfortable study pace.\n\nTRANSCRIPT:\nto Pick out",
+          "response_format": {
+            "type": "audio"
+          },
+          "generation_config": {
+            "speech_config": [
+              {
+                "voice": "Iapetus",
+                "language": "en-US"
+              }
+            ]
+          },
+          "store": false
+        }
+      },
+      "response": {
+        "status_code": 400,
+        "body": "{\"error\":{\"message\":\"Request contains an invalid argument.\",\"code\":\"invalid_request\"}}"
+      }
+    },
+    {
+      "name": "control-probe.json",
+      "control": "to Wear off",
+      "status": 200,
+      "body": "<successful audio omitted>"
+    },
+    {
+      "name": "explicit-speech-probe.json",
+      "captured_at": "2026-10-15T19:27:31.337655+00:00",
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/interactions",
+        "method": "POST",
+        "headers": {
+          "Api-Revision": "2026-05-20",
+          "Content-Type": "application/json",
+          "x-goog-api-key": "[redacted]"
+        },
+        "json": {
+          "model": "gemini-3.1-flash-tts-preview",
+          "input": "Generate speech. Read only the transcript below, exactly once, without an introduction or extra words. Use clear, natural contemporary American English at a comfortable study pace.\n\nTRANSCRIPT:\nto Pick out",
+          "response_format": {
+            "type": "audio"
+          },
+          "generation_config": {
+            "speech_config": [
+              {
+                "voice": "Iapetus",
+                "language": "en-US"
+              }
+            ]
+          },
+          "store": false
+        }
+      },
+      "response": {
+        "status_code": 200,
+        "body": "<successful audio omitted>"
+      }
+    },
+    {
+      "name": "original-confirmation.json",
+      "captured_at": "2026-10-15T19:29:04.900742+00:00",
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/interactions",
+        "method": "POST",
+        "headers": {
+          "Api-Revision": "2026-05-20",
+          "Content-Type": "application/json",
+          "x-goog-api-key": "[redacted]"
+        },
+        "json": {
+          "model": "gemini-3.1-flash-tts-preview",
+          "input": "Read only the transcript below, exactly once, without an introduction or extra words. Use clear, natural contemporary American English at a comfortable study pace.\n\nTRANSCRIPT:\nto Pick out",
+          "response_format": {
+            "type": "audio"
+          },
+          "generation_config": {
+            "speech_config": [
+              {
+                "voice": "Iapetus",
+                "language": "en-US"
+              }
+            ]
+          },
+          "store": false
+        }
+      },
+      "response": {
+        "status_code": 400,
+        "body": "{\"error\":{\"message\":\"Request contains an invalid argument.\",\"code\":\"invalid_request\"}}"
+      }
+    }
+  ],
+  "creation": {
+    "status": "ok",
+    "estimate": {
+      "items": 1,
+      "min_bytes": 90112,
+      "max_bytes": 372736
+    },
+    "created": [
+      {
+        "item_id": "85bea839303c8b7d269fef13edd9ccded66ad41e7db21b4ea0d70b525fc9dd50",
+        "note_id": 1792092624561,
+        "metrics": {
+          "anthropic": {
+            "input_tokens": 1261,
+            "output_tokens": 217
+          },
+          "pollinations": {
+            "image_bytes": 365185,
+            "estimated_cost_usd": 0.002
+          },
+          "gemini": {
+            "input_tokens": 41,
+            "audio_tokens": 40,
+            "mp3_bytes": 20205,
+            "estimated_cost_usd": 0.000841
+          }
+        }
+      }
+    ],
+    "skipped": [],
+    "error": null
+  },
+  "verification": {
+    "verified": true,
+    "note_id": 1792092624561,
+    "card_ids": [
+      1792092624561,
+      1792092624562
+    ],
+    "existing_notes_unchanged": 19,
+    "notes_today": 20,
+    "duplicate_checks_skipped": 21,
+    "media": [
+      {
+        "field": "MainAudio",
+        "filename": "aa2_85bea839303c8b7d269fef13edd9ccded66ad41e7db21b4ea0d70b525fc9dd50_main.mp3",
+        "bytes": 20205,
+        "sha256": "92376b9f89e64116e4563c0362503e312f4e9a21fde9d796c6f886e6d973b3f5"
+      },
+      {
+        "field": "Image",
+        "filename": "aa2_85bea839303c8b7d269fef13edd9ccded66ad41e7db21b4ea0d70b525fc9dd50_image.jpg",
+        "bytes": 365185,
+        "sha256": "d4df1f905dc3834817d5bfd2a271f7bf5be8e16d80f02d2b24e37a3ffb2cddf0"
+      }
+    ]
+  },
+  "audio_format": {
+    "codec": "mp3",
+    "duration_seconds": 1.6,
+    "sample_rate": 24000,
+    "channels": 1,
+    "bit_rate": 96000
+  },
+  "tests": {
+    "full_suite_passed": 129,
+    "audio_provider_tests_passed": 11
+  }
+}

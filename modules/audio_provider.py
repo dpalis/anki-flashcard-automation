@@ -21,6 +21,7 @@ GEMINI_AUDIO_VOICE = "Iapetus"
 GEMINI_API_REVISION = "2026-05-20"
 LOCALE_PATTERN = re.compile(r"[a-z]{2,3}-[A-Z]{2}\Z")
 MIN_MP3_BYTES = 512
+MAX_ERROR_BODY_CHARS = 4096
 
 
 class AudioProviderError(RuntimeError):
@@ -91,10 +92,20 @@ class GeminiAudioProvider:
             )
             response.raise_for_status()
             envelope = response.json()
+        except requests.HTTPError as exc:
+            detail = ""
+            if exc.response is not None:
+                detail = self._redact(exc.response.text).strip()
+                if len(detail) > MAX_ERROR_BODY_CHARS:
+                    detail = detail[:MAX_ERROR_BODY_CHARS] + " [truncated]"
+            message = f"Falha na API de áudio Gemini: {self._redact(str(exc))}"
+            if detail:
+                message += f"; resposta: {detail}"
+            raise AudioProviderError(message) from None
         except (requests.RequestException, ValueError) as exc:
             raise AudioProviderError(
                 f"Falha na API de áudio Gemini: {self._redact(str(exc))}"
-            ) from exc
+            ) from None
 
         audio_block = self._single_audio_block(envelope)
         wav_bytes = self._wav_bytes(audio_block)
@@ -105,8 +116,8 @@ class GeminiAudioProvider:
     @staticmethod
     def _prompt(text: str, instruction: str) -> str:
         return (
-            "Read only the transcript below, exactly once, without an introduction or "
-            f"extra words. {instruction}\n\nTRANSCRIPT:\n{text}"
+            "Generate speech. Read only the transcript below, exactly once, without "
+            f"an introduction or extra words. {instruction}\n\nTRANSCRIPT:\n{text}"
         )
 
     @staticmethod

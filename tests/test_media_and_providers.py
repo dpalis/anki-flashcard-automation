@@ -248,6 +248,7 @@ class GeminiAudioProviderTests(unittest.TestCase):
                 payload["generation_config"]["speech_config"],
             )
             self.assertIn(instruction, payload["input"])
+            self.assertTrue(payload["input"].startswith("Generate speech. "))
             self.assertTrue(payload["input"].endswith("TRANSCRIPT:\nStudy phrase"))
         self.assertTrue(temporary_paths)
         self.assertTrue(all(not path.exists() for path in temporary_paths))
@@ -371,6 +372,47 @@ class GeminiAudioProviderTests(unittest.TestCase):
             provider.generate("hello", "en-US")
         self.assertNotIn("gemini-secret", str(raised.exception))
         self.assertIn("[redacted]", str(raised.exception))
+        self.assertEqual(1, len(session.post_calls))
+
+    def test_http_400_preserves_response_detail_without_credentials_or_retry(self):
+        response = requests.Response()
+        response.status_code = 400
+        response.url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+        response._content = json.dumps({"error": {
+            "code": "invalid_request",
+            "message": "Request contains an invalid argument.",
+            "detail": "credential: gemini-secret",
+        }}).encode()
+        session = RecordingSession(posts=[response])
+        provider = GeminiAudioProvider("gemini-secret", session=session)
+
+        with self.assertRaises(AudioProviderError) as raised:
+            provider.generate("to Pick out", "en-US")
+
+        message = str(raised.exception)
+        self.assertIn("400", message)
+        self.assertIn("invalid_request", message)
+        self.assertIn("Request contains an invalid argument.", message)
+        self.assertIn("[redacted]", message)
+        self.assertNotIn("gemini-secret", message)
+        self.assertEqual(1, len(session.post_calls))
+
+    def test_http_error_redacts_before_limiting_non_json_response(self):
+        response = requests.Response()
+        response.status_code = 502
+        response.url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+        response._content = ("proxy error " + "x" * 4078 + "gemini-secret" * 100).encode()
+        session = RecordingSession(posts=[response])
+
+        with self.assertRaises(AudioProviderError) as raised:
+            GeminiAudioProvider("gemini-secret", session=session).generate("hello", "en-US")
+
+        message = str(raised.exception)
+        self.assertIn("proxy error", message)
+        self.assertIn("[truncated]", message)
+        self.assertNotIn("gemini-secret", message)
+        self.assertNotIn("gemini", message)
+        self.assertLess(len(message), 4400)
         self.assertEqual(1, len(session.post_calls))
 
     def test_missing_ffmpeg_stops_before_the_paid_call(self):
