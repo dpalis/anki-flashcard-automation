@@ -385,6 +385,7 @@ def read_items_file(path: str | Path) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Cria notes V2 de idiomas suportados no Anki")
     parser.add_argument("--repair-json", action="store_true", help="Prévia/aplicação de reparo V2 por stdin")
+    parser.add_argument("--image-repair-json", action="store_true", help="Troca/restauração de imagem existente por stdin")
     parser.add_argument("--json", action="store_true", help="L\u00ea um pedido JSON de stdin")
     parser.add_argument("--profile", choices=profile_ids())
     source = parser.add_mutually_exclusive_group()
@@ -544,14 +545,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.repair_json:
+    if args.repair_json or args.image_repair_json:
         from modules.audio_repair import run_repair_request
-        if args.json or args.profile or args.item or args.file:
-            result = _error_result("request", "--repair-json não aceita outros modos de entrada")
+        from modules.image_repair import run_image_repair_request
+        if args.json or args.profile or args.item or args.file or (args.repair_json and args.image_repair_json):
+            result = _error_result("request", "Reparo não aceita outros modos de entrada")
         else:
             try:
                 request = json.load(sys.stdin)
-                result = run_repair_request(request, _load_settings(args.settings))
+                repair = run_image_repair_request if args.image_repair_json else run_repair_request
+                result = repair(request, _load_settings(args.settings))
             except (ValueError, OSError, ProcessError) as exc:
                 result = _error_result("request", str(exc))
         print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))

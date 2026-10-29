@@ -20,6 +20,29 @@ Conflito ou resultado incerto interrompe sem retry. O legado não é modificáve
 Essa verificação técnica não certifica a pronúncia; a gravação deve ser revisada
 antes de autorizar a aplicação. Não revise simultaneamente os mesmos cards.
 
+## Troca de imagem em notes existentes
+
+`--image-repair-json` recebe um pedido JSON por stdin, sem geração ou credenciais.
+Com `confirmed:false`, `card_id` ou `note_id` descobre as imagens de modelos
+suportados. Uma imagem local aprovada (`image_path` + `image_sha256`) completa
+a prévia; `apply_request` contém o alvo explícito e o estado exigidos pela aplicação.
+`confirmed:true` troca uma referência de imagem, preservando os demais campos,
+cards, tags, deck, agendamento, histórico e mídias. O recibo `recovery` permite
+restaurar a imagem anterior pelo mesmo fluxo de prévia/aplicação.
+
+Suporte: `Image` dos modelos V2 (dois cards), `Front`/`Back` de `Basic`.
+PNG/JPEG até 5 MiB sob Galadriel/outputs, sem symlink; `sips` do macOS verifica
+decodificação. A imagem anterior também precisa ser PNG/JPEG decodificável de
+até 5 MiB, para que a recuperação seja possível. A candidata não pode já estar
+referenciada em outro ponto da note; bytes idênticos de mídia sem referência
+na note podem ser reutilizados. A operação preserva o HTML fora do `src` selecionado; não é editor
+de cards ou templates. `rendered_reference_verified` significa que a referência
+aparece no HTML devolvido pelo Anki; aparência exige inspeção visual. Evite
+revisar/editar durante o reparo, pois o AnkiConnect não fornece escrita condicional
+atômica. Em resultado incerto, releia antes de repetir.
+
+Contrato, validação e fixture visual: [avaliação do reparo de imagem](docs/evaluations/2026-10-28-image-repair.md).
+
 ## Entrada JSON da V2
 
 `./run.sh --json` recebe pela entrada padrão exatamente `profile` (texto),
